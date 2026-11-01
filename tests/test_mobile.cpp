@@ -26,6 +26,17 @@ void TestSensors() {
     assert(std::abs(euler0.pitchDeg) < 1e-3f);
     assert(std::abs(euler0.rollDeg) < 1e-3f);
 
+    // Pure X-axis rotation (+30 deg forward/backward tilt) -> Pitch = +30 deg, Roll = 0 deg
+    const float rad15 = 15.0f * (3.14159265f / 180.0f);
+    const EulerAngles eulerPitch = SensorManager::QuaternionToEuler({std::cos(rad15), std::sin(rad15), 0.0f, 0.0f});
+    assert(std::abs(eulerPitch.pitchDeg - 30.0f) < 0.05f);
+    assert(std::abs(eulerPitch.rollDeg) < 0.05f);
+
+    // Pure Y-axis rotation (+30 deg left/right bank) -> Roll = +30 deg, Pitch = 0 deg
+    const EulerAngles eulerRoll = SensorManager::QuaternionToEuler({std::cos(rad15), 0.0f, std::sin(rad15), 0.0f});
+    assert(std::abs(eulerRoll.rollDeg - 30.0f) < 0.05f);
+    assert(std::abs(eulerRoll.pitchDeg) < 0.05f);
+
     sensors.UpdateFrame(0.016);
     const auto& snap = sensors.GetSnapshot();
     assert(snap.sampleSequence > 0);

@@ -28,22 +28,26 @@ constexpr float kDegToRad = std::numbers::pi_v<float> / 180.0f;
 }
 
 [[nodiscard]] Quaternion EulerToQuaternion(float pitchDeg, float rollDeg, float yawDeg) noexcept {
-    const float halfPitch = (pitchDeg * kDegToRad) * 0.5f;
-    const float halfRoll  = (rollDeg  * kDegToRad) * 0.5f;
-    const float halfYaw   = (yawDeg   * kDegToRad) * 0.5f;
+    // Smartphone coordinate system (X = Right, Y = Forward/Up, Z = Out of screen):
+    // - Pitch (Дифферент): rotation around X-axis
+    // - Roll  (Крен):      rotation around Y-axis
+    // - Yaw   (Курс):      rotation around Z-axis
+    const float halfPitch = (pitchDeg * kDegToRad) * 0.5f; // X-axis
+    const float halfRoll  = (rollDeg  * kDegToRad) * 0.5f; // Y-axis
+    const float halfYaw   = (yawDeg   * kDegToRad) * 0.5f; // Z-axis
 
-    const float cp = std::cos(halfPitch);
-    const float sp = std::sin(halfPitch);
-    const float cr = std::cos(halfRoll);
-    const float sr = std::sin(halfRoll);
-    const float cy = std::cos(halfYaw);
-    const float sy = std::sin(halfYaw);
+    const float cx = std::cos(halfPitch);
+    const float sx = std::sin(halfPitch);
+    const float cy = std::cos(halfRoll);
+    const float sy = std::sin(halfRoll);
+    const float cz = std::cos(halfYaw);
+    const float sz = std::sin(halfYaw);
 
     return Quaternion{
-        cr * cp * cy + sr * sp * sy,
-        sr * cp * cy - cr * sp * sy,
-        cr * sp * cy + sr * cp * sy,
-        cr * cp * sy - sr * sp * cy
+        cx * cy * cz + sx * sy * sz, // w
+        sx * cy * cz - cx * sy * sz, // x (Pitch)
+        cx * sy * cz + sx * cy * sz, // y (Roll)
+        cx * cy * sz - sx * sy * cz  // z (Yaw)
     };
 }
 
@@ -324,41 +328,64 @@ void SensorManager::PollAndroidSensors() {
     bool gotEvent = false;
     const float prevAlt = m_snapshot.barometricAltitudeMeters;
 
+    // Remap physical sensor axes to current screen orientation (Portrait vs Landscape)
+    const SDL_DisplayID displayId = SDL_GetPrimaryDisplay();
+    const SDL_DisplayOrientation dispOrient = displayId ? SDL_GetCurrentDisplayOrientation(displayId) : SDL_ORIENTATION_PORTRAIT;
+    const auto remapToScreen = [dispOrient](float x, float y, float z) noexcept -> Vec3 {
+        switch (dispOrient) {
+            case SDL_ORIENTATION_LANDSCAPE:         return {-y,  x, z}; // 90 deg CCW (ROTATION_90)
+            case SDL_ORIENTATION_LANDSCAPE_FLIPPED: return { y, -x, z}; // 90 deg CW  (ROTATION_270)
+            case SDL_ORIENTATION_PORTRAIT_FLIPPED:  return {-x, -y, z}; // 180 deg    (ROTATION_180)
+            default:                                return { x,  y, z}; // Portrait   (ROTATION_0)
+        }
+    };
+
+    const bool hasRotationVector = m_infos[static_cast<size_t>(SensorType::RotationVector)].available;
+
     while (ASensorEventQueue_getEvents(m_android->queue, &ev, 1) > 0) {
         gotEvent = true;
         m_snapshot.timestampNs = static_cast<uint64_t>(ev.timestamp);
 
         switch (ev.type) {
-            case kAndroidTypeAccelerometer:
-                m_snapshot.accelerometer = {ev.acceleration.x, ev.acceleration.y, ev.acceleration.z};
+            case kAndroidTypeAccelerometer: {
+                m_snapshot.accelerometer = remapToScreen(ev.acceleration.x, ev.acceleration.y, ev.acceleration.z);
                 m_snapshot.gLoad = m_snapshot.accelerometer.Magnitude() / kGravityStandard;
-                m_snapshot.slipSkid = std::clamp(-ev.acceleration.x / kGravityStandard, -1.0f, 1.0f);
+                m_snapshot.slipSkid = std::clamp(-m_snapshot.accelerometer.x / kGravityStandard, -1.0f, 1.0f);
+                if (!hasRotationVector) {
+                    const Vec3& a = m_snapshot.accelerometer;
+                    m_snapshot.attitude.pitchDeg = std::atan2(-a.y, std::sqrt(a.x * a.x + a.z * a.z)) * kRadToDeg;
+                    m_snapshot.attitude.rollDeg  = std::atan2(a.x, a.z) * kRadToDeg;
+                    m_snapshot.attitudeQuat = EulerToQuaternion(
+                        m_snapshot.attitude.pitchDeg,
+                        m_snapshot.attitude.rollDeg,
+                        m_snapshot.attitude.yawDeg
+                    );
+                }
                 break;
+            }
 
             case kAndroidTypeLinearAcceleration:
-                m_snapshot.linearAcceleration = {ev.acceleration.x, ev.acceleration.y, ev.acceleration.z};
+                m_snapshot.linearAcceleration = remapToScreen(ev.acceleration.x, ev.acceleration.y, ev.acceleration.z);
                 break;
 
             case kAndroidTypeGravity:
-                m_snapshot.gravity = {ev.vector.x, ev.vector.y, ev.vector.z};
+                m_snapshot.gravity = remapToScreen(ev.vector.x, ev.vector.y, ev.vector.z);
                 break;
 
             case kAndroidTypeGyroscope:
-                m_snapshot.gyroscope = {ev.vector.x, ev.vector.y, ev.vector.z};
+                m_snapshot.gyroscope = remapToScreen(ev.vector.x, ev.vector.y, ev.vector.z);
                 break;
 
             case kAndroidTypeMagneticField:
-                m_snapshot.magnetometer = {ev.magnetic.x, ev.magnetic.y, ev.magnetic.z};
+                m_snapshot.magnetometer = remapToScreen(ev.magnetic.x, ev.magnetic.y, ev.magnetic.z);
                 break;
 
             case kAndroidTypeRotationVector: {
-                const float qx = ev.data[0];
-                const float qy = ev.data[1];
-                const float qz = ev.data[2];
+                const Vec3 qv = remapToScreen(ev.data[0], ev.data[1], ev.data[2]);
                 const float qw = (ev.data[3] != 0.0f)
                     ? ev.data[3]
-                    : std::sqrt(std::max(0.0f, 1.0f - (qx * qx + qy * qy + qz * qz)));
-                m_snapshot.attitudeQuat = {qw, qx, qy, qz};
+                    : std::sqrt(std::max(0.0f, 1.0f - (qv.x * qv.x + qv.y * qv.y + qv.z * qv.z)));
+                m_snapshot.attitudeQuat = {qw, qv.x, qv.y, qv.z};
                 m_snapshot.attitude = QuaternionToEuler(m_snapshot.attitudeQuat);
                 break;
             }
@@ -510,20 +537,21 @@ float SensorManager::PressureToAltitudeMeters(float pressureHpa, float seaLevelH
 EulerAngles SensorManager::QuaternionToEuler(Quaternion q) noexcept {
     EulerAngles out{};
 
-    // Roll (x-axis rotation)
-    const float sinr_cosp = 2.0f * (q.w * q.x + q.y * q.z);
-    const float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
-    out.rollDeg = std::atan2(sinr_cosp, cosr_cosp) * kRadToDeg;
-
-    // Pitch (y-axis rotation)
-    const float sinp = 2.0f * (q.w * q.y - q.z * q.x);
+    // Smartphone coordinate system (X = Right, Y = Forward/Up, Z = Out of screen):
+    // - Pitch (Дифферент / Тангаж): rotation around X-axis (tilting phone forward/backward)
+    const float sinp = 2.0f * (q.w * q.x + q.y * q.z);
     if (std::abs(sinp) >= 1.0f) {
         out.pitchDeg = std::copysign(90.0f, sinp);
     } else {
         out.pitchDeg = std::asin(sinp) * kRadToDeg;
     }
 
-    // Yaw (z-axis rotation)
+    // - Roll (Крен): rotation around Y-axis (tilting phone left/right)
+    const float sinr_cosp = 2.0f * (q.w * q.y - q.z * q.x);
+    const float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
+    out.rollDeg = std::atan2(sinr_cosp, cosr_cosp) * kRadToDeg;
+
+    // - Yaw / Heading (Курс): rotation around Z-axis
     const float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
     const float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
     out.yawDeg = std::atan2(siny_cosp, cosy_cosp) * kRadToDeg;
