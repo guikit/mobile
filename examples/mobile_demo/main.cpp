@@ -17,17 +17,18 @@ using namespace guikit;
 using namespace guikit::mobile;
 
 enum class MobileTab : size_t {
-    ImuAttitude = 0,
-    CameraVision = 1,
-    AudioSpectrum = 2,
-    GnssAndSystem = 3
+    Horizon       = 0,
+    Sensors       = 1,
+    CameraVision  = 2,
+    AudioSpectrum = 3,
+    GnssAndSystem = 4
 };
 
 struct MobileAppState {
     size_t activeTab{0};
     bool showSimulatorDrawer{true};
     bool compactAdiMode{true};
-    int imuSignalAxis{3}; // 0=X, 1=Y, 2=Z, 3=|G|
+    int imuSignalAxis{3}; // 0=AccX, 1=AccY, 2=AccZ, 3=|G|, 4=Gyro, 5=Mag, 6=Baro
     ImageViewParams cameraViewParams{};
     GisRenderConfig gisConfig{};
     std::vector<GeoLayer> chartLayers;
@@ -58,21 +59,20 @@ void RenderStatusBar(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
     if (auto bar = ui.Box({
         .widthMode = SizeMode::Stretch,
         .heightMode = SizeMode::Fit,
-        .padding = Padding::Symmetric(14.0f, 6.0f),
+        .padding = Padding::Symmetric(10.0f, 5.0f),
         .background = {.normal = Color(13, 18, 28, 255)},
         .border = {.width = 1.0f, .radius = 0.0f}
     })) {
-        if (auto row = ui.Row({.gap = 10.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
-            ui.Text(ui.Format("{} | {}", dev.model, dev.osVersion), {
+        if (auto row = ui.Row({.gap = 8.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
+            ui.Text(ui.Format("{}", dev.model), {
                 .role = TextRole::LabelSmall,
                 .variant = UiVariant::Info
             });
 
             ui.Spacer();
 
-            ui.Text(ui.Format("GNSS {} sat | {:.0f} hPa | {:.0f} lx",
+            ui.Text(ui.Format("{} sat | {:.0f} lx",
                               fix.satellitesUsed,
-                              snap.pressureHpa,
                               snap.ambientLightLux), {
                 .role = TextRole::CodeSmall,
                 .variant = UiVariant::Muted
@@ -84,7 +84,7 @@ void RenderStatusBar(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
             });
 
             if (ui.Size(UiSize::Xs).Button({
-                .text = app.showSimulatorDrawer ? "Hide Sim" : "Sim Controls",
+                .text = app.showSimulatorDrawer ? "Hide Sim" : "Sim",
                 .icon = Icon::Settings(),
                 .color = app.showSimulatorDrawer ? StateColor::Primary() : StateColor{}
             }).clicked) {
@@ -95,119 +95,166 @@ void RenderStatusBar(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
     }
 }
 
-void RenderImuAttitudeTab(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
+void RenderHorizonTab(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
     const auto& snap = runtime.Sensors().GetSnapshot();
 
-    if (auto scroll = ui.ScrollArea({
-        .padding = Padding::All(12.0f)
+    if (auto col = ui.Column({
+        .gap = 8.0f,
+        .padding = Padding::All(8.0f),
+        .widthMode = SizeMode::Stretch,
+        .heightMode = SizeMode::Stretch
     })) {
-        if (auto col = ui.Column({.gap = 12.0f, .widthMode = SizeMode::Stretch})) {
-            // 1. Primary Flight / Attitude Horizon Card
-            if (auto card = ui.Card({
-                .gap = 10.0f,
-                .padding = Padding::All(14.0f),
-                .widthMode = SizeMode::Stretch
-            })) {
-                if (auto hdr = ui.Row({.gap = 8.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
-                    ui.Size(UiSize::Sm).Heading({
-                        .label = "9-DOF Attitude & Artificial Horizon",
-                        .description = "Driven by SensorManager (RotationVector + Barometer + G-Load)",
-                        .icon = Icon::Play()
-                    });
-                    ui.Spacer();
-                    const bool isHandheld = (runtime.Sensors().GetAttitudeReference() == AttitudeReference::Handheld);
-                    if (ui.Size(UiSize::Xs).Button({
-                        .text = isHandheld ? "Ref: Handheld" : "Ref: Table",
-                        .color = isHandheld ? StateColor::Primary() : StateColor{}
-                    }).clicked) {
-                        runtime.Sensors().SetAttitudeReference(
-                            isHandheld ? AttitudeReference::FlatTable : AttitudeReference::Handheld
-                        );
-                        runtime.System().TriggerHaptic(HapticStyle::Selection);
-                    }
-                    if (ui.Size(UiSize::Xs).Button({
-                        .text = runtime.Sensors().HasAttitudeTare() ? "Reset 0°" : "Zero 0°",
-                        .color = runtime.Sensors().HasAttitudeTare() ? StateColor::Warning() : StateColor{}
-                    }).clicked) {
-                        if (runtime.Sensors().HasAttitudeTare()) {
-                            runtime.Sensors().ResetAttitudeTare();
-                        } else {
-                            runtime.Sensors().TareAttitude();
-                        }
-                        runtime.System().TriggerHaptic(HapticStyle::Medium);
-                    }
-                    if (ui.Size(UiSize::Xs).Button({
-                        .text = app.compactAdiMode ? "Compact ADI" : "Full PFD",
-                        .icon = Icon::Refresh()
-                    }).clicked) {
-                        app.compactAdiMode = !app.compactAdiMode;
-                        runtime.System().TriggerHaptic(HapticStyle::Light);
-                    }
-                }
-
-                ui.AttitudeView({
-                    .displayMode = app.compactAdiMode ? AttitudeDisplayMode::CompactADI : AttitudeDisplayMode::FullPFD,
-                    .colorScheme = AttitudeColorScheme::GlassCockpit,
-                    .rollDeg = snap.attitude.rollDeg,
-                    .pitchDeg = snap.attitude.pitchDeg,
-                    .headingDeg = snap.attitude.headingDeg,
-                    .airspeedKnots = runtime.Location().GetLatestFix().SpeedKnots(),
-                    .altitudeFeet = snap.barometricAltitudeMeters * 3.28084f,
-                    .verticalSpeedFpm = snap.verticalSpeedMps * 196.85f,
-                    .slipSkid = snap.slipSkid,
-                    .gLoad = snap.gLoad,
-                    .showIlsDiamonds = false,
-                    .height = 310.0f,
-                    .heightMode = SizeMode::Fit
+        if (auto card = ui.Card({
+            .gap = 8.0f,
+            .padding = Padding::All(10.0f),
+            .widthMode = SizeMode::Stretch,
+            .heightMode = SizeMode::Stretch
+        })) {
+            if (auto hdr = ui.Row({.gap = 6.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
+                ui.Size(UiSize::Sm).Heading({
+                    .label = "Artificial Horizon",
+                    .icon = Icon::Play()
                 });
-
-                if (auto metrics = ui.Row({.gap = 8.0f, .widthMode = SizeMode::Stretch})) {
-                    auto metricBox = [&](std::string_view title, std::string_view val, UiVariant var) {
-                        if (auto b = ui.Card({.gap = 2.0f, .padding = Padding::All(8.0f), .widthMode = SizeMode::Stretch})) {
-                            ui.Text(title, {.role = TextRole::LabelSmall, .variant = UiVariant::Muted});
-                            ui.Text(val, {.role = TextRole::CodeMedium, .variant = var});
-                        }
-                    };
-                    metricBox("PITCH / ROLL", ui.Format("{:+.1f} / {:+.1f} deg", snap.attitude.pitchDeg, snap.attitude.rollDeg), UiVariant::Info);
-                    metricBox("HEADING (MAG)", ui.Format("{:05.1f} deg", snap.attitude.headingDeg), UiVariant::Primary);
-                    metricBox("G-LOAD / STEPS", ui.Format("{:.2f} G | {} stp", snap.gLoad, snap.stepCount), UiVariant::Success);
+                ui.Spacer();
+                const bool isHandheld = (runtime.Sensors().GetAttitudeReference() == AttitudeReference::Handheld);
+                if (ui.Size(UiSize::Xs).Button({
+                    .text = isHandheld ? "Ref: Hand" : "Ref: Table",
+                    .color = isHandheld ? StateColor::Primary() : StateColor{}
+                }).clicked) {
+                    runtime.Sensors().SetAttitudeReference(
+                        isHandheld ? AttitudeReference::FlatTable : AttitudeReference::Handheld
+                    );
+                    runtime.System().TriggerHaptic(HapticStyle::Selection);
+                }
+                if (ui.Size(UiSize::Xs).Button({
+                    .text = runtime.Sensors().HasAttitudeTare() ? "Reset 0°" : "Zero 0°",
+                    .color = runtime.Sensors().HasAttitudeTare() ? StateColor::Warning() : StateColor{}
+                }).clicked) {
+                    if (runtime.Sensors().HasAttitudeTare()) {
+                        runtime.Sensors().ResetAttitudeTare();
+                    } else {
+                        runtime.Sensors().TareAttitude();
+                    }
+                    runtime.System().TriggerHaptic(HapticStyle::Medium);
+                }
+                if (ui.Size(UiSize::Xs).Button({
+                    .text = app.compactAdiMode ? "ADI" : "PFD",
+                    .icon = Icon::Refresh()
+                }).clicked) {
+                    app.compactAdiMode = !app.compactAdiMode;
+                    runtime.System().TriggerHaptic(HapticStyle::Light);
                 }
             }
 
-            // 2. 3-Axis IMU Readouts & Real-Time Vibration Spectrum
-            if (auto card = ui.Card({
-                .gap = 10.0f,
-                .padding = Padding::All(14.0f),
-                .widthMode = SizeMode::Stretch
-            })) {
-                if (auto hdr = ui.Row({.gap = 8.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
-                    ui.Size(UiSize::Sm).Heading({
-                        .label = "MEMS Accelerometer, Gyroscope & Vibration STFT",
-                        .description = ui.Format("Accel: ({:+.2f}, {:+.2f}, {:+.2f}) m/s^2  |  Gyro: ({:+.2f}, {:+.2f}, {:+.2f}) rad/s",
-                                                 snap.accelerometer.x, snap.accelerometer.y, snap.accelerometer.z,
-                                                 snap.gyroscope.x, snap.gyroscope.y, snap.gyroscope.z),
-                        .icon = Icon::Flash()
-                    });
-                    ui.Spacer();
-                    static constexpr std::array<std::string_view, 4> kAxisLabels = {"Acc X", "Acc Y", "Acc Z", "|G| Net"};
-                    ui.Size(UiSize::Xs).Segmented(app.imuSignalAxis, kAxisLabels);
-                }
+            ui.AttitudeView({
+                .displayMode = app.compactAdiMode ? AttitudeDisplayMode::CompactADI : AttitudeDisplayMode::FullPFD,
+                .colorScheme = AttitudeColorScheme::GlassCockpit,
+                .rollDeg = snap.attitude.rollDeg,
+                .pitchDeg = snap.attitude.pitchDeg,
+                .headingDeg = snap.attitude.headingDeg,
+                .airspeedKnots = runtime.Location().GetLatestFix().SpeedKnots(),
+                .altitudeFeet = snap.barometricAltitudeMeters * 3.28084f,
+                .verticalSpeedFpm = snap.verticalSpeedMps * 196.85f,
+                .slipSkid = snap.slipSkid,
+                .gLoad = snap.gLoad,
+                .showIlsDiamonds = false,
+                .heightMode = SizeMode::Stretch
+            });
 
-                std::span<const float> trace = runtime.Sensors().GetAccelMagnitudeHistory();
-                if (app.imuSignalAxis == 0) trace = runtime.Sensors().GetAccelHistoryX();
-                else if (app.imuSignalAxis == 1) trace = runtime.Sensors().GetAccelHistoryY();
-                else if (app.imuSignalAxis == 2) trace = runtime.Sensors().GetAccelHistoryZ();
+            if (auto metrics = ui.Row({.gap = 6.0f, .widthMode = SizeMode::Stretch})) {
+                auto metricBox = [&](std::string_view title, std::string_view val, UiVariant var) {
+                    if (auto b = ui.Card({.gap = 2.0f, .padding = Padding::Symmetric(8.0f, 6.0f), .widthMode = SizeMode::Stretch})) {
+                        ui.Text(title, {.role = TextRole::LabelSmall, .variant = UiVariant::Muted});
+                        ui.Text(val, {.role = TextRole::CodeSmall, .variant = var});
+                    }
+                };
+                metricBox("PITCH / ROLL", ui.Format("{:+.1f}° / {:+.1f}°", snap.attitude.pitchDeg, snap.attitude.rollDeg), UiVariant::Info);
+                metricBox("HEADING", ui.Format("{:05.1f}°", snap.attitude.headingDeg), UiVariant::Primary);
+                metricBox("G-LOAD / ALT", ui.Format("{:.2f}G | {:.0f}m", snap.gLoad, snap.barometricAltitudeMeters), UiVariant::Success);
+            }
+        }
+    }
+}
 
-                ui.SignalView(trace, {
-                    .sampleRate = runtime.Sensors().GetEstimatedSampleRateHz(),
-                    .amplitudeScale = AmplitudeScale::Linear,
-                    .colormap = Colormap::Plasma,
-                    .fftSize = 256,
-                    .showOverviewBar = false,
-                    .height = 240.0f,
-                    .heightMode = SizeMode::Fit
+void RenderSensorsTab(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
+    const auto& snap = runtime.Sensors().GetSnapshot();
+
+    if (auto col = ui.Column({
+        .gap = 8.0f,
+        .padding = Padding::All(8.0f),
+        .widthMode = SizeMode::Stretch,
+        .heightMode = SizeMode::Stretch
+    })) {
+        // 1. Live Sensor Oscilloscope & STFT Card (stretches to fill available height)
+        if (auto card = ui.Card({
+            .gap = 8.0f,
+            .padding = Padding::All(10.0f),
+            .widthMode = SizeMode::Stretch,
+            .heightMode = SizeMode::Stretch
+        })) {
+            if (auto hdr = ui.Row({.gap = 6.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
+                ui.Size(UiSize::Sm).Heading({
+                    .label = "MEMS Sensor Waveforms & Vibration STFT",
+                    .icon = Icon::Flash()
+                });
+                ui.Spacer();
+                ui.Text(ui.Format("{:.0f} Hz", runtime.Sensors().GetEstimatedSampleRateHz()), {
+                    .role = TextRole::CodeSmall,
+                    .variant = UiVariant::Info
                 });
             }
+
+            static constexpr std::array<std::string_view, 7> kChannelLabels = {
+                "Acc X", "Acc Y", "Acc Z", "|G|", "Gyro", "Mag", "Baro"
+            };
+            ui.Size(UiSize::Xs).Segmented(app.imuSignalAxis, kChannelLabels, {
+                .stretch = StretchMode::Fill
+            });
+
+            std::span<const float> trace = runtime.Sensors().GetAccelMagnitudeHistory();
+            if (app.imuSignalAxis == 0)      trace = runtime.Sensors().GetAccelHistoryX();
+            else if (app.imuSignalAxis == 1) trace = runtime.Sensors().GetAccelHistoryY();
+            else if (app.imuSignalAxis == 2) trace = runtime.Sensors().GetAccelHistoryZ();
+            else if (app.imuSignalAxis == 4) trace = runtime.Sensors().GetGyroMagnitudeHistory();
+            else if (app.imuSignalAxis == 5) trace = runtime.Sensors().GetMagMagnitudeHistory();
+            else if (app.imuSignalAxis == 6) trace = runtime.Sensors().GetBaroAltitudeHistory();
+
+            ui.SignalView(trace, {
+                .sampleRate = runtime.Sensors().GetEstimatedSampleRateHz(),
+                .amplitudeScale = AmplitudeScale::Linear,
+                .colormap = Colormap::Plasma,
+                .fftSize = 256,
+                .showOverviewBar = false,
+                .heightMode = SizeMode::Stretch
+            });
+        }
+
+        // 2. Compact 9-DOF & Environmental Digital Telemetry Grid
+        auto metricCell = [&](std::string_view title, std::string_view val, UiVariant var) {
+            if (auto b = ui.Card({.gap = 2.0f, .padding = Padding::Symmetric(8.0f, 6.0f), .widthMode = SizeMode::Stretch})) {
+                ui.Text(title, {.role = TextRole::LabelSmall, .variant = UiVariant::Muted});
+                ui.Text(val, {.role = TextRole::CodeSmall, .variant = var});
+            }
+        };
+
+        if (auto row1 = ui.Row({.gap = 6.0f, .widthMode = SizeMode::Stretch})) {
+            metricCell("ACCEL (m/s²)",
+                       ui.Format("{:+.1f} {:+.1f} {:+.1f}", snap.accelerometer.x, snap.accelerometer.y, snap.accelerometer.z),
+                       UiVariant::Info);
+            metricCell("GYRO (rad/s)",
+                       ui.Format("{:+.2f} {:+.2f} {:+.2f}", snap.gyroscope.x, snap.gyroscope.y, snap.gyroscope.z),
+                       UiVariant::Primary);
+        }
+        if (auto row2 = ui.Row({.gap = 6.0f, .widthMode = SizeMode::Stretch})) {
+            metricCell("MAG (uT)",
+                       ui.Format("{:+.0f} {:+.0f} {:+.0f}", snap.magnetometer.x, snap.magnetometer.y, snap.magnetometer.z),
+                       UiVariant::Warning);
+            metricCell("ENV & STEPS",
+                       ui.Format("{:.0f}lx | {} | {} stp",
+                                 snap.ambientLightLux,
+                                 snap.proximityNear ? "NEAR" : "FAR",
+                                 snap.stepCount),
+                       UiVariant::Success);
         }
     }
 }
@@ -217,85 +264,83 @@ void RenderCameraVisionTab(Context& ui, MobileRuntime& runtime, MobileAppState& 
     const auto& stats = cam.GetFrameStats();
     const auto* activeDev = cam.GetActiveDevice();
 
-    if (auto scroll = ui.ScrollArea({
-        .padding = Padding::All(12.0f)
+    if (auto col = ui.Column({
+        .gap = 8.0f,
+        .padding = Padding::All(8.0f),
+        .widthMode = SizeMode::Stretch,
+        .heightMode = SizeMode::Stretch
     })) {
-        if (auto col = ui.Column({.gap = 12.0f, .widthMode = SizeMode::Stretch})) {
-            // 1. Camera Toolbar & Hardware Controls
-            if (auto card = ui.Card({
-                .gap = 10.0f,
-                .padding = Padding::All(12.0f),
-                .widthMode = SizeMode::Stretch
-            })) {
-                if (auto row = ui.Row({.gap = 8.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
-                    ui.Size(UiSize::Sm).Heading({
-                        .label = activeDev ? activeDev->name : "Mobile Camera",
-                        .description = ui.Format("{}x{} @ {:.1f} FPS | Mean Luma: {:.1f} | Photos: {}",
-                                                 stats.width, stats.height, stats.fps,
-                                                 stats.meanLuminance, cam.GetCapturedPhotoCount()),
-                        .icon = Icon::Eye()
-                    });
-                    ui.Spacer();
-
-                    if (ui.Size(UiSize::Sm).Button({
-                        .text = "Switch Cam",
-                        .icon = Icon::Refresh()
-                    }).clicked) {
-                        cam.SwitchCameraFacing();
-                        runtime.System().TriggerHaptic(HapticStyle::Medium);
-                    }
-
-                    bool torch = cam.IsTorchEnabled();
-                    if (ui.Size(UiSize::Sm).Button({
-                        .text = torch ? "Torch: ON" : "Torch: OFF",
-                        .icon = Icon::Flash(),
-                        .color = torch ? StateColor::Warning() : StateColor{}
-                    }).clicked) {
-                        cam.SetTorchEnabled(!torch);
-                        runtime.System().TriggerHaptic(HapticStyle::Light);
-                    }
-
-                    if (ui.Size(UiSize::Sm).Button({
-                        .text = "Capture",
-                        .icon = Icon::Save(),
-                        .color = StateColor::Primary()
-                    }).clicked) {
-                        cam.CaptureSnapshot();
-                        runtime.System().TriggerHaptic(HapticStyle::Success);
-                    }
-                }
-
-                if (auto sliders = ui.Row({.gap = 16.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
-                    float ev = cam.GetExposureCompensationEv();
-                    if (auto el = ui.Size(UiSize::Sm).Element({.label = "Exposure EV", .stretch = StretchMode::Fill})) {
-                        if (ui.Size(UiSize::Sm).Slider(ev, -2.0f, 2.0f, {.valueFormat = "%+.1f EV"}).changed) {
-                            cam.SetExposureCompensationEv(ev);
-                        }
-                    }
-
-                    float zoom = cam.GetZoomFactor();
-                    if (auto el = ui.Size(UiSize::Sm).Element({.label = "Digital Zoom", .stretch = StretchMode::Fill})) {
-                        if (ui.Size(UiSize::Sm).Slider(zoom, 1.0f, 5.0f, {.valueFormat = "%.1fx"}).changed) {
-                            cam.SetZoomFactor(zoom);
-                        }
-                    }
-                }
-            }
-
-            // 2. Live ImageView Workstation (with Loupe, W/L, Colormap & RGB Histogram)
-            const ImageViewData imgData = cam.GetImageViewData();
-            if (!imgData.Empty()) {
-                ui.ImageView(imgData, app.cameraViewParams, {
-                    .height = 460.0f,
-                    .minHeight = 360.0f,
-                    .heightMode = SizeMode::Fit,
-                    .showSidebar = true,
-                    .sidebarOnRight = true,
-                    .sidebarWidth = 250.0f,
-                    .showTopToolbar = true,
-                    .showStatusBar = true
+        // 1. Compact Camera Toolbar & Hardware Controls
+        if (auto card = ui.Card({
+            .gap = 6.0f,
+            .padding = Padding::All(10.0f),
+            .widthMode = SizeMode::Stretch
+        })) {
+            if (auto row = ui.Row({.gap = 6.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
+                ui.Size(UiSize::Sm).Heading({
+                    .label = activeDev ? activeDev->name : "Camera",
+                    .description = ui.Format("{}x{} @ {:.0f} FPS | Photos: {}",
+                                             stats.width, stats.height, stats.fps,
+                                             cam.GetCapturedPhotoCount()),
+                    .icon = Icon::Eye()
                 });
+                ui.Spacer();
+
+                if (ui.Size(UiSize::Xs).Button({
+                    .text = "Switch",
+                    .icon = Icon::Refresh()
+                }).clicked) {
+                    cam.SwitchCameraFacing();
+                    runtime.System().TriggerHaptic(HapticStyle::Medium);
+                }
+
+                bool torch = cam.IsTorchEnabled();
+                if (ui.Size(UiSize::Xs).Button({
+                    .text = torch ? "Torch ON" : "Torch",
+                    .icon = Icon::Flash(),
+                    .color = torch ? StateColor::Warning() : StateColor{}
+                }).clicked) {
+                    cam.SetTorchEnabled(!torch);
+                    runtime.System().TriggerHaptic(HapticStyle::Light);
+                }
+
+                if (ui.Size(UiSize::Xs).Button({
+                    .text = "Shot",
+                    .icon = Icon::Save(),
+                    .color = StateColor::Primary()
+                }).clicked) {
+                    cam.CaptureSnapshot();
+                    runtime.System().TriggerHaptic(HapticStyle::Success);
+                }
             }
+
+            if (auto sliders = ui.Row({.gap = 10.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
+                float ev = cam.GetExposureCompensationEv();
+                if (auto el = ui.Size(UiSize::Xs).Element({.label = "EV", .stretch = StretchMode::Fill})) {
+                    if (ui.Size(UiSize::Xs).Slider(ev, -2.0f, 2.0f, {.valueFormat = "%+.1f"}).changed) {
+                        cam.SetExposureCompensationEv(ev);
+                    }
+                }
+
+                float zoom = cam.GetZoomFactor();
+                if (auto el = ui.Size(UiSize::Xs).Element({.label = "Zoom", .stretch = StretchMode::Fill})) {
+                    if (ui.Size(UiSize::Xs).Slider(zoom, 1.0f, 5.0f, {.valueFormat = "%.1fx"}).changed) {
+                        cam.SetZoomFactor(zoom);
+                    }
+                }
+            }
+        }
+
+        // 2. Live ImageView Workstation (stretches to fill remaining screen without scrolling)
+        const ImageViewData imgData = cam.GetImageViewData();
+        if (!imgData.Empty()) {
+            ui.ImageView(imgData, app.cameraViewParams, {
+                .minHeight = 180.0f,
+                .heightMode = SizeMode::Stretch,
+                .showSidebar = false,
+                .showTopToolbar = true,
+                .showStatusBar = true
+            });
         }
     }
 }
@@ -303,77 +348,76 @@ void RenderCameraVisionTab(Context& ui, MobileRuntime& runtime, MobileAppState& 
 void RenderAudioSpectrumTab(Context& ui, MobileRuntime& runtime, MobileAppState&) {
     auto& audio = runtime.Audio();
 
-    if (auto scroll = ui.ScrollArea({
-        .padding = Padding::All(12.0f)
+    if (auto col = ui.Column({
+        .gap = 8.0f,
+        .padding = Padding::All(8.0f),
+        .widthMode = SizeMode::Stretch,
+        .heightMode = SizeMode::Stretch
     })) {
-        if (auto col = ui.Column({.gap = 12.0f, .widthMode = SizeMode::Stretch})) {
-            // 1. Microphone Input & Stereo Level Meter
-            if (auto card = ui.Card({
-                .gap = 10.0f,
-                .padding = Padding::All(12.0f),
-                .widthMode = SizeMode::Stretch
-            })) {
-                if (auto row = ui.Row({.gap = 8.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
-                    ui.Size(UiSize::Sm).Heading({
-                        .label = audio.IsUsingSyntheticSignal()
-                            ? "Microphone Audio Analyzer (Synthetic Harmonic Source)"
-                            : "Microphone Audio Analyzer (Live Hardware PCM)",
-                        .description = ui.Format("Peak: {:.1f} dBFS | RMS: {:.1f} dBFS | Dominant Tone: {:.0f} Hz ({:.1f} dB)",
-                                                 audio.GetPeakDbFs(), audio.GetRmsDbFs(),
-                                                 audio.GetDominantFreqHz(), audio.GetDominantPeakDb()),
-                        .icon = Icon::Play()
-                    });
-                    ui.Spacer();
-
-                    bool capturing = audio.IsCapturing();
-                    if (ui.Size(UiSize::Sm).Button({
-                        .text = capturing ? "Pause Mic" : "Resume Mic",
-                        .icon = capturing ? Icon::Pause() : Icon::Play(),
-                        .color = capturing ? StateColor::Primary() : StateColor{}
-                    }).clicked) {
-                        audio.SetCapturing(!capturing);
-                        runtime.System().TriggerHaptic(HapticStyle::Selection);
-                    }
-                }
-
-                static constexpr std::array<std::string_view, 2> kChLabels = {"MIC L", "MIC R"};
-                ui.LevelMeter(audio.GetStereoMeterDb(), -60.0f, 0.0f, {
-                    .segments = 28,
-                    .channelLabels = kChLabels
+        // 1. Microphone Input & Stereo Level Meter
+        if (auto card = ui.Card({
+            .gap = 6.0f,
+            .padding = Padding::All(10.0f),
+            .widthMode = SizeMode::Stretch
+        })) {
+            if (auto row = ui.Row({.gap = 6.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
+                ui.Size(UiSize::Sm).Heading({
+                    .label = audio.IsUsingSyntheticSignal() ? "Mic Analyzer (Synth)" : "Mic Analyzer (Live PCM)",
+                    .description = ui.Format("Peak: {:.1f} dB | RMS: {:.1f} dB | Tone: {:.0f} Hz",
+                                             audio.GetPeakDbFs(), audio.GetRmsDbFs(),
+                                             audio.GetDominantFreqHz()),
+                    .icon = Icon::Play()
                 });
+                ui.Spacer();
 
-                if (audio.IsUsingSyntheticSignal()) {
-                    float f0 = audio.GetSynthFundamentalHz();
-                    if (auto el = ui.Size(UiSize::Sm).Element({.label = "Test Tone Frequency (Hz)"})) {
-                        if (ui.Size(UiSize::Sm).Slider(f0, 120.0f, 8000.0f, {.valueFormat = "%.0f Hz"}).changed) {
-                            audio.SetSynthFundamentalHz(f0);
-                        }
-                    }
+                bool capturing = audio.IsCapturing();
+                if (ui.Size(UiSize::Xs).Button({
+                    .text = capturing ? "Pause" : "Resume",
+                    .icon = capturing ? Icon::Pause() : Icon::Play(),
+                    .color = capturing ? StateColor::Primary() : StateColor{}
+                }).clicked) {
+                    audio.SetCapturing(!capturing);
+                    runtime.System().TriggerHaptic(HapticStyle::Selection);
                 }
             }
 
-            // 2. Real-Time Spectrum Waterfall (RTSA)
-            if (auto card = ui.Card({
-                .gap = 8.0f,
-                .padding = Padding::All(12.0f),
-                .widthMode = SizeMode::Stretch
-            })) {
-                ui.WaterfallView(audio.GetSpectrumSliceDb(), {
-                    .mode = WaterfallMode::SpectrumRtsa,
-                    .viewLayout = WaterfallLayout::SplitTraceAndWaterfall,
-                    .colormap = Colormap::Turbo,
-                    .numBins = static_cast<uint32_t>(AudioCapture::kSpectrumBins),
-                    .historyRows = 180,
-                    .historyDurationSec = 10.0f,
-                    .minX = 0.0f,
-                    .maxX = audio.GetSampleRate() * 0.5f,
-                    .sliceSequence = audio.GetSpectrumSliceSequence(),
-                    .dbFloor = -95.0f,
-                    .dbCeil = 0.0f,
-                    .height = 360.0f,
-                    .heightMode = SizeMode::Fit
-                });
+            static constexpr std::array<std::string_view, 2> kChLabels = {"L", "R"};
+            ui.LevelMeter(audio.GetStereoMeterDb(), -60.0f, 0.0f, {
+                .segments = 24,
+                .channelLabels = kChLabels
+            });
+
+            if (audio.IsUsingSyntheticSignal()) {
+                float f0 = audio.GetSynthFundamentalHz();
+                if (auto el = ui.Size(UiSize::Xs).Element({.label = "Tone (Hz)"})) {
+                    if (ui.Size(UiSize::Xs).Slider(f0, 120.0f, 8000.0f, {.valueFormat = "%.0f Hz"}).changed) {
+                        audio.SetSynthFundamentalHz(f0);
+                    }
+                }
             }
+        }
+
+        // 2. Real-Time Spectrum Waterfall (stretches to fill remaining height without scrolling)
+        if (auto card = ui.Card({
+            .gap = 6.0f,
+            .padding = Padding::All(8.0f),
+            .widthMode = SizeMode::Stretch,
+            .heightMode = SizeMode::Stretch
+        })) {
+            ui.WaterfallView(audio.GetSpectrumSliceDb(), {
+                .mode = WaterfallMode::SpectrumRtsa,
+                .viewLayout = WaterfallLayout::SplitTraceAndWaterfall,
+                .colormap = Colormap::Turbo,
+                .numBins = static_cast<uint32_t>(AudioCapture::kSpectrumBins),
+                .historyRows = 180,
+                .historyDurationSec = 10.0f,
+                .minX = 0.0f,
+                .maxX = audio.GetSampleRate() * 0.5f,
+                .sliceSequence = audio.GetSpectrumSliceSequence(),
+                .dbFloor = -95.0f,
+                .dbCeil = 0.0f,
+                .heightMode = SizeMode::Stretch
+            });
         }
     }
 }
@@ -381,142 +425,109 @@ void RenderAudioSpectrumTab(Context& ui, MobileRuntime& runtime, MobileAppState&
 void RenderGnssAndSystemTab(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
     app.EnsureChartLoaded();
     const auto& fix = runtime.Location().GetLatestFix();
-    const auto& snap = runtime.Sensors().GetSnapshot();
 
-    if (auto scroll = ui.ScrollArea({
-        .padding = Padding::All(12.0f)
+    if (auto col = ui.Column({
+        .gap = 8.0f,
+        .padding = Padding::All(8.0f),
+        .widthMode = SizeMode::Stretch,
+        .heightMode = SizeMode::Stretch
     })) {
-        if (auto col = ui.Column({.gap = 12.0f, .widthMode = SizeMode::Stretch})) {
-            // 1. Live GNSS MapView & Track
-            if (auto card = ui.Card({
-                .gap = 10.0f,
-                .padding = Padding::All(12.0f),
-                .widthMode = SizeMode::Stretch
-            })) {
-                if (auto row = ui.Row({.gap = 8.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
-                    ui.Size(UiSize::Sm).Heading({
-                        .label = "GNSS Navigation & S-52 Marine Chart",
-                        .description = ui.Format("Lat: {:.5f}  Lon: {:.5f}  |  SOG: {:.1f} kn  COG: {:05.1f} deg  |  Track: {:.0f} m",
-                                                 fix.coord.lat, fix.coord.lon,
-                                                 fix.SpeedKnots(), fix.courseDeg,
-                                                 runtime.Location().GetTotalTrackDistanceMeters()),
-                        .icon = Icon::Search()
-                    });
-                    ui.Spacer();
-                    ui.Text("Follow GPS", {.role = TextRole::LabelSmall, .variant = UiVariant::Muted});
-                    ui.Size(UiSize::Sm).Checkbox(app.followGpsOnMap);
-                    if (ui.Size(UiSize::Xs).Button({.text = "Clear Track", .icon = Icon::Trash()}).clicked) {
-                        runtime.Location().ClearBreadcrumbTrack();
-                        runtime.System().TriggerHaptic(HapticStyle::Light);
-                    }
-                }
-
-                std::optional<GeoCoord> reqCenter = app.followGpsOnMap
-                    ? std::optional<GeoCoord>(fix.coord)
-                    : std::nullopt;
-
-                if (auto map = ui.MapView({
-                    .initialCenter = app.chartCenter,
-                    .initialTileZoom = 13.3f,
-                    .requestCenterGeo = reqCenter,
-                    .showTileGrid = false,
-                    .showNauticalGraticule = true,
-                    .showScaleBarOverlay = true,
-                    .heightMode = SizeMode::Fit,
-                    .height = 300.0f
-                })) {
-                    if (!app.chartLayers.empty()) {
-                        uint64_t selUid = 0;
-                        GisRenderEngine::RenderLayers(map, app.chartLayers, app.gisConfig, selUid, false);
-                    }
-
-                    // Draw recorded GNSS breadcrumb trail and live vessel/device beacon
-                    const auto track = runtime.Location().GetBreadcrumbTrack();
-                    if (track.size() >= 2) {
-                        map.DrawGeoPolyline(track, Color(56, 189, 248, 230), 2.5f, false);
-                    }
-                    map.DrawGeoCircle(fix.coord, 7.0f, Color(16, 185, 129, 255), Color(255, 255, 255, 255), 2.0f);
-                    map.DrawGeoText("GNSS POS", fix.coord, {10.0f, -10.0f}, 11.0f, Color(52, 211, 153, 255), FontStyle::Bold);
+        // 1. Live GNSS MapView & Track (stretches to fill available screen height)
+        if (auto card = ui.Card({
+            .gap = 6.0f,
+            .padding = Padding::All(10.0f),
+            .widthMode = SizeMode::Stretch,
+            .heightMode = SizeMode::Stretch
+        })) {
+            if (auto row = ui.Row({.gap = 6.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
+                ui.Size(UiSize::Sm).Heading({
+                    .label = "GNSS & Marine Chart",
+                    .description = ui.Format("{:.4f}, {:.4f} | {:.1f} kn | {:03.0f}°",
+                                             fix.coord.lat, fix.coord.lon,
+                                             fix.SpeedKnots(), fix.courseDeg),
+                    .icon = Icon::Search()
+                });
+                ui.Spacer();
+                ui.Text("Follow", {.role = TextRole::LabelSmall, .variant = UiVariant::Muted});
+                ui.Size(UiSize::Xs).Checkbox(app.followGpsOnMap);
+                if (ui.Size(UiSize::Xs).Button({.text = "Clear", .icon = Icon::Trash()}).clicked) {
+                    runtime.Location().ClearBreadcrumbTrack();
+                    runtime.System().TriggerHaptic(HapticStyle::Light);
                 }
             }
 
-            // 2. Environmental Sensors, Permissions & Haptics
-            if (auto row = ui.Row({.gap = 12.0f, .widthMode = SizeMode::Stretch})) {
-                // Environmental Card
-                if (auto envCard = ui.Card({
-                    .gap = 8.0f,
-                    .padding = Padding::All(12.0f),
-                    .widthMode = SizeMode::Stretch
-                })) {
-                    ui.Size(UiSize::Sm).Heading({
-                        .label = "Environmental & Activity Sensors",
-                        .icon = Icon::Info(),
-                        .divider = true
-                    });
-                    ui.Text(ui.Format("Barometer: {:.2f} hPa (ISA Alt: {:.1f} m)",
-                                      snap.pressureHpa, snap.barometricAltitudeMeters),
-                            {.role = TextRole::CodeSmall});
-                    ui.Text(ui.Format("Ambient Light: {:.1f} lux", snap.ambientLightLux),
-                            {.role = TextRole::CodeSmall});
-                    ui.Text(ui.Format("Proximity Sensor: {:.1f} cm ({})",
-                                      snap.proximityCm, snap.proximityNear ? "NEAR" : "FAR"),
-                            {.role = TextRole::CodeSmall});
-                    ui.Text(ui.Format("Pedometer Step Counter: {} steps", snap.stepCount),
-                            {.role = TextRole::CodeSmall});
+            std::optional<GeoCoord> reqCenter = app.followGpsOnMap
+                ? std::optional<GeoCoord>(fix.coord)
+                : std::nullopt;
+
+            if (auto map = ui.MapView({
+                .initialCenter = app.chartCenter,
+                .initialTileZoom = 13.3f,
+                .requestCenterGeo = reqCenter,
+                .showTileGrid = false,
+                .showNauticalGraticule = true,
+                .showScaleBarOverlay = true,
+                .heightMode = SizeMode::Stretch,
+                .minHeight = 160.0f
+            })) {
+                if (!app.chartLayers.empty()) {
+                    uint64_t selUid = 0;
+                    GisRenderEngine::RenderLayers(map, app.chartLayers, app.gisConfig, selUid, false);
                 }
 
-                // Runtime Permissions & Haptics Card
-                if (auto sysCard = ui.Card({
-                    .gap = 8.0f,
-                    .padding = Padding::All(12.0f),
-                    .widthMode = SizeMode::Stretch
-                })) {
-                    ui.Size(UiSize::Sm).Heading({
-                        .label = "Android Permissions & Haptics",
-                        .description = app.lastPermissionToast,
-                        .icon = Icon::Check(),
-                        .divider = true
-                    });
+                // Draw recorded GNSS breadcrumb trail and live vessel/device beacon
+                const auto track = runtime.Location().GetBreadcrumbTrack();
+                if (track.size() >= 2) {
+                    map.DrawGeoPolyline(track, Color(56, 189, 248, 230), 2.5f, false);
+                }
+                map.DrawGeoCircle(fix.coord, 7.0f, Color(16, 185, 129, 255), Color(255, 255, 255, 255), 2.0f);
+                map.DrawGeoText("GNSS POS", fix.coord, {10.0f, -10.0f}, 11.0f, Color(52, 211, 153, 255), FontStyle::Bold);
+            }
+        }
 
-                    if (auto permRow = ui.Wrap({.gap = 6.0f})) {
-                        auto permBtn = [&](Permission p, std::string_view label) {
-                            const auto st = runtime.System().GetPermissionStatus(p);
-                            if (ui.Size(UiSize::Xs).Button({
-                                .text = label,
-                                .icon = (st == PermissionStatus::Granted) ? Icon::Check() : Icon::Warning(),
-                                .color = (st == PermissionStatus::Granted) ? StateColor::Success() : StateColor::Primary()
-                            }).clicked) {
-                                runtime.System().RequestPermission(p, [&](Permission reqP, PermissionStatus res) {
-                                    app.lastPermissionToast = std::string(SystemBridge::GetPermissionDisplayName(reqP)) +
-                                        (res == PermissionStatus::Granted ? " -> GRANTED" : " -> DENIED");
-                                });
-                                runtime.System().TriggerHaptic(HapticStyle::Selection);
-                            }
-                        };
-                        permBtn(Permission::Camera, "Camera");
-                        permBtn(Permission::RecordAudio, "Microphone");
-                        permBtn(Permission::FineLocation, "Fine GPS");
-                        permBtn(Permission::BodySensors, "Sensors");
-                    }
-
-                    if (auto hapRow = ui.Row({.gap = 6.0f, .align = Alignment::Center})) {
-                        ui.Text("Haptics:", {.role = TextRole::LabelSmall, .variant = UiVariant::Muted});
-                        if (ui.Size(UiSize::Xs).Button({.text = "Light"}).clicked) {
-                            runtime.System().TriggerHaptic(HapticStyle::Light);
-                        }
-                        if (ui.Size(UiSize::Xs).Button({.text = "Medium"}).clicked) {
-                            runtime.System().TriggerHaptic(HapticStyle::Medium);
-                        }
-                        if (ui.Size(UiSize::Xs).Button({.text = "Heavy"}).clicked) {
-                            runtime.System().TriggerHaptic(HapticStyle::Heavy);
-                        }
-                        ui.Spacer();
-                        ui.Text(ui.Format("Pulses: {}", runtime.System().GetHapticPulseCount()), {
-                            .role = TextRole::CodeSmall,
-                            .variant = UiVariant::Info
+        // 2. Compact Permissions & Haptics Bar
+        if (auto sysCard = ui.Card({
+            .gap = 6.0f,
+            .padding = Padding::All(10.0f),
+            .widthMode = SizeMode::Stretch
+        })) {
+            if (auto permRow = ui.Wrap({.gap = 6.0f})) {
+                auto permBtn = [&](Permission p, std::string_view label) {
+                    const auto st = runtime.System().GetPermissionStatus(p);
+                    if (ui.Size(UiSize::Xs).Button({
+                        .text = label,
+                        .icon = (st == PermissionStatus::Granted) ? Icon::Check() : Icon::Warning(),
+                        .color = (st == PermissionStatus::Granted) ? StateColor::Success() : StateColor::Primary()
+                    }).clicked) {
+                        runtime.System().RequestPermission(p, [&](Permission reqP, PermissionStatus res) {
+                            app.lastPermissionToast = std::string(SystemBridge::GetPermissionDisplayName(reqP)) +
+                                (res == PermissionStatus::Granted ? " -> GRANTED" : " -> DENIED");
                         });
+                        runtime.System().TriggerHaptic(HapticStyle::Selection);
                     }
+                };
+                permBtn(Permission::Camera, "Camera");
+                permBtn(Permission::RecordAudio, "Mic");
+                permBtn(Permission::FineLocation, "GPS");
+                permBtn(Permission::BodySensors, "Sensors");
+            }
+
+            if (auto hapRow = ui.Row({.gap = 6.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
+                ui.Text("Haptic:", {.role = TextRole::LabelSmall, .variant = UiVariant::Muted});
+                if (ui.Size(UiSize::Xs).Button({.text = "Light"}).clicked) {
+                    runtime.System().TriggerHaptic(HapticStyle::Light);
                 }
+                if (ui.Size(UiSize::Xs).Button({.text = "Med"}).clicked) {
+                    runtime.System().TriggerHaptic(HapticStyle::Medium);
+                }
+                if (ui.Size(UiSize::Xs).Button({.text = "Heavy"}).clicked) {
+                    runtime.System().TriggerHaptic(HapticStyle::Heavy);
+                }
+                ui.Spacer();
+                ui.Text(ui.Format("{} | #{}", app.lastPermissionToast, runtime.System().GetHapticPulseCount()), {
+                    .role = TextRole::CodeSmall,
+                    .variant = UiVariant::Info
+                });
             }
         }
     }
@@ -581,17 +592,18 @@ void RenderBottomNavigationBar(Context& ui, MobileRuntime& runtime, MobileAppSta
     if (auto bar = ui.Box({
         .widthMode = SizeMode::Stretch,
         .heightMode = SizeMode::Fit,
-        .padding = Padding::Symmetric(16.0f, 8.0f),
+        .padding = Padding::Symmetric(8.0f, 6.0f),
         .background = {.normal = Color(15, 23, 42, 255)},
         .border = {.width = 1.0f, .radius = 0.0f}
     })) {
-        static constexpr std::array<std::string_view, 4> kTabs = {
-            "1. IMU & Attitude",
-            "2. Camera & Vision",
-            "3. Mic & Spectrum",
-            "4. GNSS & System"
+        static constexpr std::array<std::string_view, 5> kTabs = {
+            "Horizon",
+            "Sensors",
+            "Camera",
+            "Audio",
+            "GNSS"
         };
-        if (ui.Size(UiSize::Md).Segmented(app.activeTab, kTabs, {
+        if (ui.Size(UiSize::Sm).Segmented(app.activeTab, kTabs, {
             .stretch = StretchMode::Fill
         }).changed) {
             runtime.System().TriggerHaptic(HapticStyle::Selection);
@@ -712,8 +724,11 @@ int main(int /*argc*/, char* /*argv*/[]) {
                     .heightMode = SizeMode::Stretch
                 })) {
                     switch (static_cast<MobileTab>(app.activeTab)) {
-                        case MobileTab::ImuAttitude:
-                            RenderImuAttitudeTab(ui, mobile, app);
+                        case MobileTab::Horizon:
+                            RenderHorizonTab(ui, mobile, app);
+                            break;
+                        case MobileTab::Sensors:
+                            RenderSensorsTab(ui, mobile, app);
                             break;
                         case MobileTab::CameraVision:
                             RenderCameraVisionTab(ui, mobile, app);
