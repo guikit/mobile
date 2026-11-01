@@ -231,12 +231,11 @@ void RenderCameraVisionTab(Context& ui, MobileRuntime& runtime, MobileAppState& 
             if (auto row = ui.Row({.gap = 6.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
                 ui.Size(UiSize::Sm).Heading({
                     .label = activeDev ? activeDev->name : "Camera",
-                    .description = ui.Format("{}x{} @ {:.0f} FPS | Photos: {}",
+                    .description = ui.Format("{}x{} @ {:.0f} FPS | #{}",
                                              stats.width, stats.height, stats.fps,
                                              cam.GetCapturedPhotoCount()),
                     .icon = Icon::Eye()
                 });
-                ui.Spacer();
 
                 if (ui.Size(UiSize::Xs).Button({
                     .text = "Switch",
@@ -246,11 +245,13 @@ void RenderCameraVisionTab(Context& ui, MobileRuntime& runtime, MobileAppState& 
                     runtime.System().TriggerHaptic(HapticStyle::Medium);
                 }
 
+                const bool hasFlash = !activeDev || activeDev->isSynthetic || activeDev->hasFlashUnit;
                 bool torch = cam.IsTorchEnabled();
                 if (ui.Size(UiSize::Xs).Button({
-                    .text = torch ? "Torch ON" : "Torch",
+                    .text = torch ? "On" : "Torch",
                     .icon = Icon::Flash(),
-                    .color = torch ? StateColor::Warning() : StateColor{}
+                    .color = torch ? StateColor::Warning() : StateColor{},
+                    .disabled = !hasFlash
                 }).clicked) {
                     cam.SetTorchEnabled(!torch);
                     runtime.System().TriggerHaptic(HapticStyle::Light);
@@ -287,10 +288,12 @@ void RenderCameraVisionTab(Context& ui, MobileRuntime& runtime, MobileAppState& 
         const ImageViewData imgData = cam.GetImageViewData();
         if (!imgData.Empty()) {
             ui.ImageView(imgData, app.cameraViewParams, {
+                .height = 180.0f,
                 .minHeight = 180.0f,
                 .heightMode = SizeMode::Stretch,
                 .showSidebar = false,
                 .showTopToolbar = true,
+                .toolbarSize = UiSize::Xs,
                 .showStatusBar = true
             });
         }

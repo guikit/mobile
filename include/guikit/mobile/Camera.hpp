@@ -30,10 +30,13 @@ enum class FlashMode : uint8_t {
 struct CameraDeviceInfo {
     uint32_t deviceIndex{0};
     SDL_CameraID sdlCameraId{0};
+    std::string androidCameraId{};
     std::string name{};
     CameraFacing facing{CameraFacing::Back};
-    int preferredWidth{1280};
-    int preferredHeight{720};
+    int sensorOrientationDeg{90};
+    bool hasFlashUnit{false};
+    int preferredWidth{640};
+    int preferredHeight{480};
     float preferredFps{30.0f};
     bool isSynthetic{false};
 };
@@ -68,9 +71,13 @@ public:
     void Shutdown();
 
     /// Starts or stops the camera stream.
-    bool OpenCamera(size_t deviceIndex = 0, int width = 640, int height = 360);
+    bool OpenCamera(size_t deviceIndex = 0, int width = 640, int height = 480);
     void CloseCamera();
     [[nodiscard]] bool IsStreaming() const noexcept { return m_streaming; }
+
+    /// Pauses/resumes hardware camera stream across mobile app background/foreground transitions.
+    void SetPaused(bool paused);
+    [[nodiscard]] bool IsPaused() const noexcept { return m_paused; }
 
     /// Switches between Front and Back camera (or cycles available cameras).
     bool SwitchCameraFacing();
@@ -121,14 +128,19 @@ public:
 private:
     void GenerateProceduralFrame(double dtSeconds, float pitchDeg = 0.0f, float rollDeg = 0.0f);
     void ComputeFrameHistograms();
+    bool OpenAndroidCamera(const CameraDeviceInfo& dev, int width, int height);
+    void CloseAndroidCamera();
+
+    struct AndroidCameraState;
+    AndroidCameraState* m_androidCam{nullptr};
 
     std::vector<CameraDeviceInfo> m_devices;
     size_t m_activeDeviceIndex{0};
     SDL_Camera* m_sdlCamera{nullptr};
     SDL_Texture* m_previewTexture{nullptr};
 
-    uint32_t m_frameWidth{640};
-    uint32_t m_frameHeight{360};
+    uint32_t m_frameWidth{480};
+    uint32_t m_frameHeight{640};
     std::vector<uint8_t> m_rgbPixels;         ///< 3-channel RGB888 for `guikit::ImageView`
     std::vector<uint32_t> m_rgbaPixels;       ///< 4-channel RGBA8888 for `SDL_Texture`
     std::vector<uint8_t> m_lastCapturedRgb;
@@ -136,6 +148,7 @@ private:
 
     bool m_initialized{false};
     bool m_streaming{false};
+    bool m_paused{false};
     bool m_usingSynthetic{false};
     bool m_torchEnabled{false};
     FlashMode m_flashMode{FlashMode::Off};
@@ -144,6 +157,7 @@ private:
     float m_zoomFactor{1.0f};
     uint32_t m_capturedPhotos{0};
     double m_simTimeSec{0.0};
+    double m_retryTimerSec{0.0};
     double m_fpsAccumSec{0.0};
     uint32_t m_fpsFrameCount{0};
 };

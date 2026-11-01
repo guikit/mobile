@@ -39,6 +39,7 @@ bool MobileRuntime::ProcessEvent(const SDL_Event& ev, Context& ui, Vec2 viewport
     if (ev.type == SDL_EVENT_WILL_ENTER_BACKGROUND || ev.type == SDL_EVENT_DID_ENTER_BACKGROUND) {
         m_inBackground = true;
         m_sensors.SetPaused(true);
+        m_camera.SetPaused(true);
         m_audio.SetCapturing(false);
         return true;
     }
@@ -46,6 +47,7 @@ bool MobileRuntime::ProcessEvent(const SDL_Event& ev, Context& ui, Vec2 viewport
     if (ev.type == SDL_EVENT_WILL_ENTER_FOREGROUND || ev.type == SDL_EVENT_DID_ENTER_FOREGROUND) {
         m_inBackground = false;
         m_sensors.SetPaused(false);
+        m_camera.SetPaused(false);
         m_audio.SetCapturing(true);
         ui.InvalidateAll();
         ui.RequestRepaint(3);

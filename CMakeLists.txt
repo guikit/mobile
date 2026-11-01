@@ -52,7 +52,9 @@ target_link_libraries(guikit_mobile PUBLIC guikit::guikit)
 if (ANDROID)
     find_library(ANDROID_LIB android REQUIRED)
     find_library(ANDROID_LOG_LIB log REQUIRED)
-    target_link_libraries(guikit_mobile PUBLIC ${ANDROID_LIB} ${ANDROID_LOG_LIB})
+    find_library(ANDROID_CAMERA2NDK_LIB camera2ndk REQUIRED)
+    find_library(ANDROID_MEDIANDK_LIB mediandk REQUIRED)
+    target_link_libraries(guikit_mobile PUBLIC ${ANDROID_LIB} ${ANDROID_LOG_LIB} ${ANDROID_CAMERA2NDK_LIB} ${ANDROID_MEDIANDK_LIB})
 endif()
 
 # ==============================================================================
