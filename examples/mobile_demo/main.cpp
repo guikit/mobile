@@ -115,8 +115,29 @@ void RenderImuAttitudeTab(Context& ui, MobileRuntime& runtime, MobileAppState& a
                         .icon = Icon::Play()
                     });
                     ui.Spacer();
+                    const bool isHandheld = (runtime.Sensors().GetAttitudeReference() == AttitudeReference::Handheld);
                     if (ui.Size(UiSize::Xs).Button({
-                        .text = app.compactAdiMode ? "Mode: Compact ADI" : "Mode: Full PFD",
+                        .text = isHandheld ? "Ref: Handheld" : "Ref: Table",
+                        .color = isHandheld ? StateColor::Primary() : StateColor{}
+                    }).clicked) {
+                        runtime.Sensors().SetAttitudeReference(
+                            isHandheld ? AttitudeReference::FlatTable : AttitudeReference::Handheld
+                        );
+                        runtime.System().TriggerHaptic(HapticStyle::Selection);
+                    }
+                    if (ui.Size(UiSize::Xs).Button({
+                        .text = runtime.Sensors().HasAttitudeTare() ? "Reset 0°" : "Zero 0°",
+                        .color = runtime.Sensors().HasAttitudeTare() ? StateColor::Warning() : StateColor{}
+                    }).clicked) {
+                        if (runtime.Sensors().HasAttitudeTare()) {
+                            runtime.Sensors().ResetAttitudeTare();
+                        } else {
+                            runtime.Sensors().TareAttitude();
+                        }
+                        runtime.System().TriggerHaptic(HapticStyle::Medium);
+                    }
+                    if (ui.Size(UiSize::Xs).Button({
+                        .text = app.compactAdiMode ? "Compact ADI" : "Full PFD",
                         .icon = Icon::Refresh()
                     }).clicked) {
                         app.compactAdiMode = !app.compactAdiMode;

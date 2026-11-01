@@ -37,6 +37,15 @@ void TestSensors() {
     assert(std::abs(eulerRoll.rollDeg - 30.0f) < 0.05f);
     assert(std::abs(eulerRoll.pitchDeg) < 0.05f);
 
+    // Handheld reference: phone held vertically upright (+90 deg around X-axis) -> 0 deg Pitch & 0 deg Roll
+    const float rad45 = 45.0f * (3.14159265f / 180.0f);
+    const EulerAngles eulerHandheld = SensorManager::QuaternionToEuler(
+        {std::cos(rad45), std::sin(rad45), 0.0f, 0.0f},
+        AttitudeReference::Handheld
+    );
+    assert(std::abs(eulerHandheld.pitchDeg) < 0.05f);
+    assert(std::abs(eulerHandheld.rollDeg) < 0.05f);
+
     sensors.UpdateFrame(0.016);
     const auto& snap = sensors.GetSnapshot();
     assert(snap.sampleSequence > 0);

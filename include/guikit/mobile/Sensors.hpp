@@ -25,6 +25,12 @@ enum class SensorType : uint8_t {
     Count
 };
 
+/// Reference frame for computing Pitch and Roll from device attitude.
+enum class AttitudeReference : uint8_t {
+    Handheld = 0, ///< 0 deg Pitch/Roll when phone is held upright in hand (screen facing user, camera facing horizon)
+    FlatTable     ///< 0 deg Pitch/Roll when phone lies flat on a horizontal table (screen facing ceiling)
+};
+
 /// Sampling rate presets matching Android NDK ASensorManager rates and iOS CMMotionManager intervals.
 enum class SensorRate : uint8_t {
     Ui = 0,   ///< ~16.6 Hz (60,000 us) - Low battery impact for general UI orientation
@@ -130,6 +136,15 @@ public:
     void SetSeaLevelPressureHpa(float qnhHpa) noexcept { m_seaLevelPressureHpa = qnhHpa; }
     [[nodiscard]] float GetSeaLevelPressureHpa() const noexcept { return m_seaLevelPressureHpa; }
 
+    /// Sets the reference frame for Pitch & Roll (default: `AttitudeReference::Handheld`).
+    void SetAttitudeReference(AttitudeReference ref) noexcept;
+    [[nodiscard]] AttitudeReference GetAttitudeReference() const noexcept { return m_attitudeRef; }
+
+    /// Zeros (tares) Pitch and Roll to the current device posture, or clears the tare offset.
+    void TareAttitude() noexcept;
+    void ResetAttitudeTare() noexcept;
+    [[nodiscard]] bool HasAttitudeTare() const noexcept { return m_hasAttitudeTare; }
+
     /// Contiguous time-series history buffers (oldest -> newest) ready for `guikit::SignalView`.
     [[nodiscard]] std::span<const float> GetAccelHistoryX() const noexcept { return m_accelHistX; }
     [[nodiscard]] std::span<const float> GetAccelHistoryY() const noexcept { return m_accelHistY; }
@@ -149,7 +164,10 @@ public:
     [[nodiscard]] static float PressureToAltitudeMeters(float pressureHpa, float seaLevelHpa = 1013.25f) noexcept;
 
     /// Helper: converts unit quaternion to Euler angles (pitch, roll, yaw, heading in degrees).
-    [[nodiscard]] static EulerAngles QuaternionToEuler(Quaternion q) noexcept;
+    [[nodiscard]] static EulerAngles QuaternionToEuler(
+        Quaternion q,
+        AttitudeReference ref = AttitudeReference::FlatTable
+    ) noexcept;
 
 private:
     void PollAndroidSensors();
@@ -162,6 +180,12 @@ private:
     mutable std::mutex m_hwMutex;
 
     SensorRate m_rate{SensorRate::Game};
+    AttitudeReference m_attitudeRef{AttitudeReference::Handheld};
+    bool m_hasAttitudeTare{false};
+    float m_pitchTareDeg{0.0f};
+    float m_rollTareDeg{0.0f};
+    float m_rawUntaredPitchDeg{0.0f};
+    float m_rawUntaredRollDeg{0.0f};
     float m_seaLevelPressureHpa{1013.25f};
     double m_simTimeSec{0.0};
     bool m_initialized{false};

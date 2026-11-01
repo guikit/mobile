@@ -353,8 +353,17 @@ void SensorManager::PollAndroidSensors() {
                 m_snapshot.slipSkid = std::clamp(-m_snapshot.accelerometer.x / kGravityStandard, -1.0f, 1.0f);
                 if (!hasRotationVector) {
                     const Vec3& a = m_snapshot.accelerometer;
-                    m_snapshot.attitude.pitchDeg = std::atan2(-a.y, std::sqrt(a.x * a.x + a.z * a.z)) * kRadToDeg;
-                    m_snapshot.attitude.rollDeg  = std::atan2(a.x, a.z) * kRadToDeg;
+                    if (m_attitudeRef == AttitudeReference::Handheld) {
+                        // Handheld (upright in hand): Y is Up (+9.81), Z is out-of-screen (0 when vertical)
+                        m_rawUntaredPitchDeg = std::atan2(-a.z, std::sqrt(a.x * a.x + a.y * a.y)) * kRadToDeg;
+                        m_rawUntaredRollDeg  = std::atan2(a.x, a.y) * kRadToDeg;
+                    } else {
+                        // Flat on table: Z is Up (+9.81), Y is forward (0 when flat)
+                        m_rawUntaredPitchDeg = std::atan2(-a.y, std::sqrt(a.x * a.x + a.z * a.z)) * kRadToDeg;
+                        m_rawUntaredRollDeg  = std::atan2(a.x, a.z) * kRadToDeg;
+                    }
+                    m_snapshot.attitude.pitchDeg = m_rawUntaredPitchDeg - (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f);
+                    m_snapshot.attitude.rollDeg  = m_rawUntaredRollDeg  - (m_hasAttitudeTare ? m_rollTareDeg  : 0.0f);
                     m_snapshot.attitudeQuat = EulerToQuaternion(
                         m_snapshot.attitude.pitchDeg,
                         m_snapshot.attitude.rollDeg,
@@ -386,7 +395,12 @@ void SensorManager::PollAndroidSensors() {
                     ? ev.data[3]
                     : std::sqrt(std::max(0.0f, 1.0f - (qv.x * qv.x + qv.y * qv.y + qv.z * qv.z)));
                 m_snapshot.attitudeQuat = {qw, qv.x, qv.y, qv.z};
-                m_snapshot.attitude = QuaternionToEuler(m_snapshot.attitudeQuat);
+                EulerAngles rawEuler = QuaternionToEuler(m_snapshot.attitudeQuat, m_attitudeRef);
+                m_rawUntaredPitchDeg = rawEuler.pitchDeg;
+                m_rawUntaredRollDeg  = rawEuler.rollDeg;
+                rawEuler.pitchDeg -= (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f);
+                rawEuler.rollDeg  -= (m_hasAttitudeTare ? m_rollTareDeg  : 0.0f);
+                m_snapshot.attitude = rawEuler;
                 break;
             }
 
@@ -528,16 +542,58 @@ void SensorManager::PushHistorySample(const SensorSnapshot& snap) {
     AppendRingSample(m_baroAltHist, snap.barometricAltitudeMeters, kDefaultHistorySamples);
 }
 
+void SensorManager::SetAttitudeReference(AttitudeReference ref) noexcept {
+    if (m_attitudeRef != ref) {
+        m_attitudeRef = ref;
+        ResetAttitudeTare();
+    }
+}
+
+void SensorManager::TareAttitude() noexcept {
+    m_pitchTareDeg = m_rawUntaredPitchDeg;
+    m_rollTareDeg  = m_rawUntaredRollDeg;
+    m_hasAttitudeTare = true;
+    m_snapshot.attitude.pitchDeg = 0.0f;
+    m_snapshot.attitude.rollDeg  = 0.0f;
+}
+
+void SensorManager::ResetAttitudeTare() noexcept {
+    m_hasAttitudeTare = false;
+    m_pitchTareDeg = 0.0f;
+    m_rollTareDeg  = 0.0f;
+}
+
 float SensorManager::PressureToAltitudeMeters(float pressureHpa, float seaLevelHpa) noexcept {
     if (pressureHpa <= 0.0f || seaLevelHpa <= 0.0f) return 0.0f;
     // International Barometric Formula: h = 44330 * (1 - (P / P0)^(1/5.255))
     return 44330.0f * (1.0f - std::pow(pressureHpa / seaLevelHpa, 0.190294957f));
 }
 
-EulerAngles SensorManager::QuaternionToEuler(Quaternion q) noexcept {
+EulerAngles SensorManager::QuaternionToEuler(Quaternion q, AttitudeReference ref) noexcept {
     EulerAngles out{};
 
-    // Smartphone coordinate system (X = Right, Y = Forward/Up, Z = Out of screen):
+    if (ref == AttitudeReference::Handheld) {
+        // World Up (Zenith) unit vector expressed in smartphone screen frame (X=Right, Y=Up, Z=Out):
+        //   When holding phone vertically in hand looking at screen: u = (0, 1, 0) -> Pitch = 0, Roll = 0.
+        //   Tilting top of phone away/forward (camera down): uz > 0 -> Pitch < 0.
+        //   Tilting top of phone back toward user (camera up): uz < 0 -> Pitch > 0.
+        //   Banking phone right (right edge down): ux < 0 -> Roll > 0.
+        const float ux = 2.0f * (q.x * q.z - q.w * q.y);
+        const float uy = 2.0f * (q.y * q.z + q.w * q.x);
+        const float uz = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
+
+        out.pitchDeg = std::atan2(-uz, std::sqrt(ux * ux + uy * uy)) * kRadToDeg;
+        out.rollDeg  = std::atan2(-ux, uy) * kRadToDeg;
+
+        // Device +X (right edge) projected onto World East-North plane is invariant to pitch:
+        const float xEast  = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
+        const float xNorth = 2.0f * (q.x * q.y + q.w * q.z);
+        out.yawDeg = std::atan2(-xNorth, xEast) * kRadToDeg;
+        out.headingDeg = std::fmod(out.yawDeg + 360.0f, 360.0f);
+        return out;
+    }
+
+    // FlatTable reference (0 deg Pitch/Roll when phone lies flat on a horizontal table):
     // - Pitch (Дифферент / Тангаж): rotation around X-axis (tilting phone forward/backward)
     const float sinp = 2.0f * (q.w * q.x + q.y * q.z);
     if (std::abs(sinp) >= 1.0f) {
