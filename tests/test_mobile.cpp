@@ -56,7 +56,16 @@ void TestSensors() {
     assert(std::abs(eulerHandPlus45.pitchDeg - 45.0f) < 0.05f);
     assert(std::abs(eulerHandPlus45.rollDeg) < 0.05f);
 
-    // 3) Phone tilted -45 deg forward toward table (+45 deg from table) -> -45 deg Pitch (Brown Ground) & 0 deg Roll
+    // 3) Phone tilted +60 deg past vertical (+150 deg from table) -> +60 deg Pitch (Blue Sky) & 0 deg Roll (never jumps to -90 deg!)
+    const float rad75 = 75.0f * (3.14159265f / 180.0f);
+    const EulerAngles eulerHandPlus60 = SensorManager::QuaternionToEuler(
+        {std::cos(rad75), std::sin(rad75), 0.0f, 0.0f},
+        AttitudeReference::Handheld
+    );
+    assert(std::abs(eulerHandPlus60.pitchDeg - 60.0f) < 0.05f);
+    assert(std::abs(eulerHandPlus60.rollDeg) < 0.05f);
+
+    // 4) Phone tilted -45 deg forward toward table (+45 deg from table) -> -45 deg Pitch (Brown Ground) & 0 deg Roll
     const float rad22_5 = 22.5f * (3.14159265f / 180.0f);
     const EulerAngles eulerHandMinus45 = SensorManager::QuaternionToEuler(
         {std::cos(rad22_5), std::sin(rad22_5), 0.0f, 0.0f},

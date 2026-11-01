@@ -99,6 +99,8 @@ struct SensorManager::AndroidImpl {
     ALooper* looper{nullptr};
     ASensorEventQueue* queue{nullptr};
     std::array<const ASensor*, static_cast<size_t>(SensorType::Count)> sensors{};
+    Vec3 filteredAccel{0.0f, kGravityStandard, 0.0f};
+    bool hasFilteredAccel{false};
     uint64_t initialStepOffset{0};
     bool hasInitialSteps{false};
 #endif
@@ -340,7 +342,7 @@ void SensorManager::PollAndroidSensors() {
         }
     };
 
-    const bool hasRotationVector = m_infos[static_cast<size_t>(SensorType::RotationVector)].available;
+    const bool hasAccelerometer = m_infos[static_cast<size_t>(SensorType::Accelerometer)].available;
 
     while (ASensorEventQueue_getEvents(m_android->queue, &ev, 1) > 0) {
         gotEvent = true;
@@ -351,29 +353,43 @@ void SensorManager::PollAndroidSensors() {
                 m_snapshot.accelerometer = remapToScreen(ev.acceleration.x, ev.acceleration.y, ev.acceleration.z);
                 m_snapshot.gLoad = m_snapshot.accelerometer.Magnitude() / kGravityStandard;
                 m_snapshot.slipSkid = std::clamp(-m_snapshot.accelerometer.x / kGravityStandard, -1.0f, 1.0f);
-                if (!hasRotationVector) {
-                    const Vec3& a = m_snapshot.accelerometer;
-                    const float yzMag = std::sqrt(a.y * a.y + a.z * a.z);
-                    if (m_attitudeRef == AttitudeReference::Handheld) {
-                        // Real Artificial Horizon (Vertical in hand = 0 deg Horizon, Flat on table = -90 deg, Sky = +90 deg)
-                        m_rawUntaredPitchDeg = std::clamp(std::atan2(-a.z, a.y) * kRadToDeg, -90.0f, 90.0f);
-                    } else {
-                        // Flat on table = 0 deg
-                        m_rawUntaredPitchDeg = std::clamp(std::atan2(a.y, a.z) * kRadToDeg, -90.0f, 90.0f);
-                    }
-                    m_rawUntaredRollDeg = std::atan2(a.x, yzMag) * kRadToDeg;
-                    m_snapshot.attitude.pitchDeg = std::clamp(
-                        m_rawUntaredPitchDeg - (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f),
-                        -90.0f,
-                        90.0f
-                    );
-                    m_snapshot.attitude.rollDeg = m_rawUntaredRollDeg - (m_hasAttitudeTare ? m_rollTareDeg : 0.0f);
-                    m_snapshot.attitudeQuat = EulerToQuaternion(
-                        m_snapshot.attitude.pitchDeg,
-                        m_snapshot.attitude.rollDeg,
-                        m_snapshot.attitude.yawDeg
-                    );
+
+                // Smooth low-pass filter on hardware MEMS accelerometer to eliminate hand tremor
+                // while remaining 100% immune to vendor pseudo-gyro / RotationVector 45-deg flips
+                constexpr float kAccelSmoothing = 0.22f;
+                if (!m_android->hasFilteredAccel) {
+                    m_android->filteredAccel = m_snapshot.accelerometer;
+                    m_android->hasFilteredAccel = true;
+                } else {
+                    m_android->filteredAccel.x += kAccelSmoothing * (m_snapshot.accelerometer.x - m_android->filteredAccel.x);
+                    m_android->filteredAccel.y += kAccelSmoothing * (m_snapshot.accelerometer.y - m_android->filteredAccel.y);
+                    m_android->filteredAccel.z += kAccelSmoothing * (m_snapshot.accelerometer.z - m_android->filteredAccel.z);
                 }
+
+                const Vec3& g = m_android->filteredAccel;
+                const float xyMag = std::sqrt(g.x * g.x + g.y * g.y);
+                const float yzMag = std::sqrt(g.y * g.y + g.z * g.z);
+                if (m_attitudeRef == AttitudeReference::Handheld) {
+                    // Real Artificial Horizon (Vertical in hand = 0 deg Horizon, Flat on table = -90 deg, Sky = +90 deg)
+                    // Non-negative xyMag denominator ensures Pitch stays strictly in [0, +90] whenever g.z < 0 (Blue Sky)
+                    // and strictly in [-90, 0] whenever g.z > 0 (Brown Ground), never jumping at 45 deg!
+                    m_rawUntaredPitchDeg = std::clamp(std::atan2(-g.z, xyMag) * kRadToDeg, -90.0f, 90.0f);
+                } else {
+                    // Flat on table = 0 deg
+                    m_rawUntaredPitchDeg = std::clamp(std::atan2(g.y, g.z) * kRadToDeg, -90.0f, 90.0f);
+                }
+                m_rawUntaredRollDeg = std::atan2(-g.x, yzMag) * kRadToDeg;
+                m_snapshot.attitude.pitchDeg = std::clamp(
+                    m_rawUntaredPitchDeg - (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f),
+                    -90.0f,
+                    90.0f
+                );
+                m_snapshot.attitude.rollDeg = m_rawUntaredRollDeg - (m_hasAttitudeTare ? m_rollTareDeg : 0.0f);
+                m_snapshot.attitudeQuat = EulerToQuaternion(
+                    m_snapshot.attitude.pitchDeg,
+                    m_snapshot.attitude.rollDeg,
+                    m_snapshot.attitude.yawDeg
+                );
                 break;
             }
 
@@ -398,17 +414,20 @@ void SensorManager::PollAndroidSensors() {
                 const float qw = (ev.data[3] != 0.0f)
                     ? ev.data[3]
                     : std::sqrt(std::max(0.0f, 1.0f - (qv.x * qv.x + qv.y * qv.y + qv.z * qv.z)));
-                m_snapshot.attitudeQuat = {qw, qv.x, qv.y, qv.z};
-                EulerAngles rawEuler = QuaternionToEuler(m_snapshot.attitudeQuat, m_attitudeRef);
-                m_rawUntaredPitchDeg = rawEuler.pitchDeg;
-                m_rawUntaredRollDeg  = rawEuler.rollDeg;
-                rawEuler.pitchDeg = std::clamp(
-                    rawEuler.pitchDeg - (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f),
-                    -90.0f,
-                    90.0f
-                );
-                rawEuler.rollDeg -= (m_hasAttitudeTare ? m_rollTareDeg : 0.0f);
-                m_snapshot.attitude = rawEuler;
+                EulerAngles rawEuler = QuaternionToEuler({qw, qv.x, qv.y, qv.z}, m_attitudeRef);
+                m_snapshot.attitude.yawDeg = rawEuler.yawDeg;
+                m_snapshot.attitude.headingDeg = rawEuler.headingDeg;
+                if (!hasAccelerometer) {
+                    m_snapshot.attitudeQuat = {qw, qv.x, qv.y, qv.z};
+                    m_rawUntaredPitchDeg = rawEuler.pitchDeg;
+                    m_rawUntaredRollDeg  = rawEuler.rollDeg;
+                    m_snapshot.attitude.pitchDeg = std::clamp(
+                        rawEuler.pitchDeg - (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f),
+                        -90.0f,
+                        90.0f
+                    );
+                    m_snapshot.attitude.rollDeg = rawEuler.rollDeg - (m_hasAttitudeTare ? m_rollTareDeg : 0.0f);
+                }
                 break;
             }
 
@@ -588,14 +607,15 @@ EulerAngles SensorManager::QuaternionToEuler(Quaternion q, AttitudeReference ref
     const float uy = 2.0f * (q.y * q.z + q.w * q.x);
     const float uz = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
 
+    const float xyMag = std::sqrt(ux * ux + uy * uy);
     const float yzMag = std::sqrt(uy * uy + uz * uz);
 
     if (ref == AttitudeReference::Handheld) {
         // Real Artificial Horizon (Vertical panel in front of pilot = 0 deg Horizon):
-        //   - Vertical in hand (uy=1, uz=0)   ->   0 deg (Horizon)
-        //   - Flat on table    (uy=0, uz=+1)  -> -90 deg (Ground / Nadir)
-        //   - Camera to zenith (uy=0, uz=-1)  -> +90 deg (Sky / Zenith)
-        out.pitchDeg = std::clamp(std::atan2(-uz, uy) * kRadToDeg, -90.0f, 90.0f);
+        //   - Vertical in hand (xyMag=1, uz=0)  ->   0 deg (Horizon)
+        //   - Flat on table    (xyMag=0, uz=+1) -> -90 deg (Ground / Nadir)
+        //   - Camera to zenith (xyMag=0, uz=-1) -> +90 deg (Sky / Zenith)
+        out.pitchDeg = std::clamp(std::atan2(-uz, xyMag) * kRadToDeg, -90.0f, 90.0f);
     } else {
         // FlatTable reference (0 deg when phone lies flat on a horizontal table):
         out.pitchDeg = std::clamp(std::atan2(uy, uz) * kRadToDeg, -90.0f, 90.0f);
