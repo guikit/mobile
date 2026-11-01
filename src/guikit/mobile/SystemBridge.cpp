@@ -240,13 +240,22 @@ void SystemBridge::UpdateSafeArea() {
         SDL_Rect safeRect{};
         int winW = 0;
         int winH = 0;
-        SDL_GetWindowSize(m_window, &winW, &winH);
+        SDL_GetWindowSizeInPixels(m_window, &winW, &winH);
         if (SDL_GetWindowSafeArea(m_window, &safeRect) && winW > 0 && winH > 0) {
             m_safeArea.left   = static_cast<float>(std::max(0, safeRect.x));
             m_safeArea.top    = static_cast<float>(std::max(0, safeRect.y));
             m_safeArea.right  = static_cast<float>(std::max(0, winW - (safeRect.x + safeRect.w)));
             m_safeArea.bottom = static_cast<float>(std::max(0, winH - (safeRect.y + safeRect.h)));
         }
+#ifdef __ANDROID__
+        const float dpi = std::max(1.0f, SDL_GetWindowDisplayScale(m_window));
+        m_safeArea.top = std::max(m_safeArea.top, 44.0f * dpi);
+        if (winH >= winW) {
+            m_safeArea.bottom = std::max(m_safeArea.bottom, 50.0f * dpi);
+        } else if (m_safeArea.left < 1.0f && m_safeArea.right < 1.0f) {
+            m_safeArea.right = std::max(m_safeArea.right, 50.0f * dpi);
+        }
+#endif
     }
 
     if (m_deviceInfo.isSimulator && m_simulateCutout &&

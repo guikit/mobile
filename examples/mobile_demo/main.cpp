@@ -583,6 +583,9 @@ int main(int /*argc*/, char* /*argv*/[]) {
         return 1;
     }
     SDL_SetRenderVSync(renderer, 1);
+    SDL_GetWindowSizeInPixels(window, &winW, &winH);
+    winW = std::max(1, winW);
+    winH = std::max(1, winH);
 
     Context ui;
     ThorCanvas canvas;
@@ -658,9 +661,21 @@ int main(int /*argc*/, char* /*argv*/[]) {
         mobile.UpdateFrame(dt, ui);
 
         const float dpi = SDL_GetWindowDisplayScale(window);
-        ui.BeginFrame({static_cast<float>(winW), static_cast<float>(winH)}, dpi > 0.0f ? dpi : 1.0f);
+        const float effDpi = (dpi > 0.0f) ? dpi : 1.0f;
+        ui.BeginFrame({static_cast<float>(winW), static_cast<float>(winH)}, effDpi);
+
+        const SafeAreaInsets safe = mobile.System().GetSafeAreaInsets();
+        const Padding rootPadding = mobile.System().GetDeviceInfo().isSimulator
+            ? Padding{}
+            : Padding(
+                  safe.left / effDpi,
+                  safe.top / effDpi,
+                  safe.right / effDpi,
+                  safe.bottom / effDpi
+              );
 
         if (auto root = ui.Column({
+            .padding = rootPadding,
             .widthMode = SizeMode::Stretch,
             .heightMode = SizeMode::Stretch
         })) {
