@@ -354,10 +354,14 @@ void SensorManager::PollAndroidSensors() {
                 if (!hasRotationVector) {
                     const Vec3& a = m_snapshot.accelerometer;
                     const float yzMag = std::sqrt(a.y * a.y + a.z * a.z);
-                    const float elevDeg = std::atan2(a.y, a.z) * kRadToDeg;
-                    const float refOffsetDeg = (m_attitudeRef == AttitudeReference::Handheld) ? 45.0f : 0.0f;
-                    m_rawUntaredPitchDeg = std::clamp(elevDeg - refOffsetDeg, -90.0f, 90.0f);
-                    m_rawUntaredRollDeg  = std::atan2(a.x, yzMag) * kRadToDeg;
+                    if (m_attitudeRef == AttitudeReference::Handheld) {
+                        // Real Artificial Horizon (Vertical in hand = 0 deg Horizon, Flat on table = -90 deg, Sky = +90 deg)
+                        m_rawUntaredPitchDeg = std::clamp(std::atan2(-a.z, a.y) * kRadToDeg, -90.0f, 90.0f);
+                    } else {
+                        // Flat on table = 0 deg
+                        m_rawUntaredPitchDeg = std::clamp(std::atan2(a.y, a.z) * kRadToDeg, -90.0f, 90.0f);
+                    }
+                    m_rawUntaredRollDeg = std::atan2(a.x, yzMag) * kRadToDeg;
                     m_snapshot.attitude.pitchDeg = std::clamp(
                         m_rawUntaredPitchDeg - (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f),
                         -90.0f,
@@ -577,19 +581,25 @@ EulerAngles SensorManager::QuaternionToEuler(Quaternion q, AttitudeReference ref
     EulerAngles out{};
 
     // World Up (Zenith) unit vector expressed in smartphone screen frame (X=Right, Y=Up, Z=Out):
-    //   - Phone flat on table (screen up):        u = (0, 0, 1) -> elev =   0 deg
-    //   - Phone held at 45 deg in hand:           u = (0, .707, .707) -> elev = +45 deg
-    //   - Phone held vertically upright (90 deg): u = (0, 1, 0) -> elev = +90 deg
+    //   - Phone flat on table (screen up):        u = (0, 0, +1)
+    //   - Phone held vertically upright (in hand): u = (0, +1, 0)
+    //   - Phone tilted back (camera pointing up):  u = (0, cos, -sin)
     const float ux = 2.0f * (q.x * q.z - q.w * q.y);
     const float uy = 2.0f * (q.y * q.z + q.w * q.x);
     const float uz = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
 
     const float yzMag = std::sqrt(uy * uy + uz * uz);
-    const float elevFromTableDeg = std::atan2(uy, uz) * kRadToDeg;
-    const float refOffsetDeg = (ref == AttitudeReference::Handheld) ? 45.0f : 0.0f;
 
-    // Pitch (Дифферент): continuous elevation relative to reference posture, clamped to [-90, +90]
-    out.pitchDeg = std::clamp(elevFromTableDeg - refOffsetDeg, -90.0f, 90.0f);
+    if (ref == AttitudeReference::Handheld) {
+        // Real Artificial Horizon (Vertical panel in front of pilot = 0 deg Horizon):
+        //   - Vertical in hand (uy=1, uz=0)   ->   0 deg (Horizon)
+        //   - Flat on table    (uy=0, uz=+1)  -> -90 deg (Ground / Nadir)
+        //   - Camera to zenith (uy=0, uz=-1)  -> +90 deg (Sky / Zenith)
+        out.pitchDeg = std::clamp(std::atan2(-uz, uy) * kRadToDeg, -90.0f, 90.0f);
+    } else {
+        // FlatTable reference (0 deg when phone lies flat on a horizontal table):
+        out.pitchDeg = std::clamp(std::atan2(uy, uz) * kRadToDeg, -90.0f, 90.0f);
+    }
 
     // Roll (Крен): lateral bank angle around viewing axis using non-negative yzMag denominator
     // so pitching through 45 deg or 90 deg NEVER flips Roll by 180 deg!
