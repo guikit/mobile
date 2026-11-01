@@ -353,17 +353,17 @@ void SensorManager::PollAndroidSensors() {
                 m_snapshot.slipSkid = std::clamp(-m_snapshot.accelerometer.x / kGravityStandard, -1.0f, 1.0f);
                 if (!hasRotationVector) {
                     const Vec3& a = m_snapshot.accelerometer;
-                    if (m_attitudeRef == AttitudeReference::Handheld) {
-                        // Handheld (upright in hand): Y is Up (+9.81), Z is out-of-screen (0 when vertical)
-                        m_rawUntaredPitchDeg = std::atan2(-a.z, std::sqrt(a.x * a.x + a.y * a.y)) * kRadToDeg;
-                        m_rawUntaredRollDeg  = std::atan2(a.x, a.y) * kRadToDeg;
-                    } else {
-                        // Flat on table: Z is Up (+9.81), Y is forward (0 when flat)
-                        m_rawUntaredPitchDeg = std::atan2(-a.y, std::sqrt(a.x * a.x + a.z * a.z)) * kRadToDeg;
-                        m_rawUntaredRollDeg  = std::atan2(a.x, a.z) * kRadToDeg;
-                    }
-                    m_snapshot.attitude.pitchDeg = m_rawUntaredPitchDeg - (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f);
-                    m_snapshot.attitude.rollDeg  = m_rawUntaredRollDeg  - (m_hasAttitudeTare ? m_rollTareDeg  : 0.0f);
+                    const float yzMag = std::sqrt(a.y * a.y + a.z * a.z);
+                    const float elevDeg = std::atan2(a.y, a.z) * kRadToDeg;
+                    const float refOffsetDeg = (m_attitudeRef == AttitudeReference::Handheld) ? 45.0f : 0.0f;
+                    m_rawUntaredPitchDeg = std::clamp(elevDeg - refOffsetDeg, -90.0f, 90.0f);
+                    m_rawUntaredRollDeg  = std::atan2(a.x, yzMag) * kRadToDeg;
+                    m_snapshot.attitude.pitchDeg = std::clamp(
+                        m_rawUntaredPitchDeg - (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f),
+                        -90.0f,
+                        90.0f
+                    );
+                    m_snapshot.attitude.rollDeg = m_rawUntaredRollDeg - (m_hasAttitudeTare ? m_rollTareDeg : 0.0f);
                     m_snapshot.attitudeQuat = EulerToQuaternion(
                         m_snapshot.attitude.pitchDeg,
                         m_snapshot.attitude.rollDeg,
@@ -398,8 +398,12 @@ void SensorManager::PollAndroidSensors() {
                 EulerAngles rawEuler = QuaternionToEuler(m_snapshot.attitudeQuat, m_attitudeRef);
                 m_rawUntaredPitchDeg = rawEuler.pitchDeg;
                 m_rawUntaredRollDeg  = rawEuler.rollDeg;
-                rawEuler.pitchDeg -= (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f);
-                rawEuler.rollDeg  -= (m_hasAttitudeTare ? m_rollTareDeg  : 0.0f);
+                rawEuler.pitchDeg = std::clamp(
+                    rawEuler.pitchDeg - (m_hasAttitudeTare ? m_pitchTareDeg : 0.0f),
+                    -90.0f,
+                    90.0f
+                );
+                rawEuler.rollDeg -= (m_hasAttitudeTare ? m_rollTareDeg : 0.0f);
                 m_snapshot.attitude = rawEuler;
                 break;
             }
@@ -572,45 +576,29 @@ float SensorManager::PressureToAltitudeMeters(float pressureHpa, float seaLevelH
 EulerAngles SensorManager::QuaternionToEuler(Quaternion q, AttitudeReference ref) noexcept {
     EulerAngles out{};
 
-    if (ref == AttitudeReference::Handheld) {
-        // World Up (Zenith) unit vector expressed in smartphone screen frame (X=Right, Y=Up, Z=Out):
-        //   When holding phone vertically in hand looking at screen: u = (0, 1, 0) -> Pitch = 0, Roll = 0.
-        //   Tilting top of phone away/forward (camera down): uz > 0 -> Pitch < 0.
-        //   Tilting top of phone back toward user (camera up): uz < 0 -> Pitch > 0.
-        //   Banking phone right (right edge down): ux < 0 -> Roll > 0.
-        const float ux = 2.0f * (q.x * q.z - q.w * q.y);
-        const float uy = 2.0f * (q.y * q.z + q.w * q.x);
-        const float uz = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
+    // World Up (Zenith) unit vector expressed in smartphone screen frame (X=Right, Y=Up, Z=Out):
+    //   - Phone flat on table (screen up):        u = (0, 0, 1) -> elev =   0 deg
+    //   - Phone held at 45 deg in hand:           u = (0, .707, .707) -> elev = +45 deg
+    //   - Phone held vertically upright (90 deg): u = (0, 1, 0) -> elev = +90 deg
+    const float ux = 2.0f * (q.x * q.z - q.w * q.y);
+    const float uy = 2.0f * (q.y * q.z + q.w * q.x);
+    const float uz = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
 
-        out.pitchDeg = std::atan2(-uz, std::sqrt(ux * ux + uy * uy)) * kRadToDeg;
-        out.rollDeg  = std::atan2(-ux, uy) * kRadToDeg;
+    const float yzMag = std::sqrt(uy * uy + uz * uz);
+    const float elevFromTableDeg = std::atan2(uy, uz) * kRadToDeg;
+    const float refOffsetDeg = (ref == AttitudeReference::Handheld) ? 45.0f : 0.0f;
 
-        // Device +X (right edge) projected onto World East-North plane is invariant to pitch:
-        const float xEast  = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
-        const float xNorth = 2.0f * (q.x * q.y + q.w * q.z);
-        out.yawDeg = std::atan2(-xNorth, xEast) * kRadToDeg;
-        out.headingDeg = std::fmod(out.yawDeg + 360.0f, 360.0f);
-        return out;
-    }
+    // Pitch (Дифферент): continuous elevation relative to reference posture, clamped to [-90, +90]
+    out.pitchDeg = std::clamp(elevFromTableDeg - refOffsetDeg, -90.0f, 90.0f);
 
-    // FlatTable reference (0 deg Pitch/Roll when phone lies flat on a horizontal table):
-    // - Pitch (Дифферент / Тангаж): rotation around X-axis (tilting phone forward/backward)
-    const float sinp = 2.0f * (q.w * q.x + q.y * q.z);
-    if (std::abs(sinp) >= 1.0f) {
-        out.pitchDeg = std::copysign(90.0f, sinp);
-    } else {
-        out.pitchDeg = std::asin(sinp) * kRadToDeg;
-    }
+    // Roll (Крен): lateral bank angle around viewing axis using non-negative yzMag denominator
+    // so pitching through 45 deg or 90 deg NEVER flips Roll by 180 deg!
+    out.rollDeg = std::atan2(-ux, yzMag) * kRadToDeg;
 
-    // - Roll (Крен): rotation around Y-axis (tilting phone left/right)
-    const float sinr_cosp = 2.0f * (q.w * q.y - q.z * q.x);
-    const float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
-    out.rollDeg = std::atan2(sinr_cosp, cosr_cosp) * kRadToDeg;
-
-    // - Yaw / Heading (Курс): rotation around Z-axis
-    const float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
-    const float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
-    out.yawDeg = std::atan2(siny_cosp, cosy_cosp) * kRadToDeg;
+    // Yaw / Heading (Курс): device +X (right edge) projected onto World East-North plane (pitch-invariant)
+    const float xEast  = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
+    const float xNorth = 2.0f * (q.x * q.y + q.w * q.z);
+    out.yawDeg = std::atan2(-xNorth, xEast) * kRadToDeg;
     out.headingDeg = std::fmod(out.yawDeg + 360.0f, 360.0f);
 
     return out;

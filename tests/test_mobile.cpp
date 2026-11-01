@@ -37,14 +37,33 @@ void TestSensors() {
     assert(std::abs(eulerRoll.rollDeg - 30.0f) < 0.05f);
     assert(std::abs(eulerRoll.pitchDeg) < 0.05f);
 
-    // Handheld reference: phone held vertically upright (+90 deg around X-axis) -> 0 deg Pitch & 0 deg Roll
+    // Handheld reference:
+    // 1) Phone held at natural 45 deg angle -> 0 deg Pitch & 0 deg Roll
+    const float rad22_5 = 22.5f * (3.14159265f / 180.0f);
+    const EulerAngles eulerHand0 = SensorManager::QuaternionToEuler(
+        {std::cos(rad22_5), std::sin(rad22_5), 0.0f, 0.0f},
+        AttitudeReference::Handheld
+    );
+    assert(std::abs(eulerHand0.pitchDeg) < 0.05f);
+    assert(std::abs(eulerHand0.rollDeg) < 0.05f);
+
+    // 2) Phone held vertically upright (+90 deg from table) -> +45 deg Pitch (Blue Sky) & 0 deg Roll (never 180 deg!)
     const float rad45 = 45.0f * (3.14159265f / 180.0f);
-    const EulerAngles eulerHandheld = SensorManager::QuaternionToEuler(
+    const EulerAngles eulerHand45 = SensorManager::QuaternionToEuler(
         {std::cos(rad45), std::sin(rad45), 0.0f, 0.0f},
         AttitudeReference::Handheld
     );
-    assert(std::abs(eulerHandheld.pitchDeg) < 0.05f);
-    assert(std::abs(eulerHandheld.rollDeg) < 0.05f);
+    assert(std::abs(eulerHand45.pitchDeg - 45.0f) < 0.05f);
+    assert(std::abs(eulerHand45.rollDeg) < 0.05f);
+
+    // 3) Phone tilted past vertical (+120 deg from table) -> +75 deg Pitch (Blue Sky) & 0 deg Roll (never flips to 180 deg!)
+    const float rad60 = 60.0f * (3.14159265f / 180.0f);
+    const EulerAngles eulerHand75 = SensorManager::QuaternionToEuler(
+        {std::cos(rad60), std::sin(rad60), 0.0f, 0.0f},
+        AttitudeReference::Handheld
+    );
+    assert(std::abs(eulerHand75.pitchDeg - 75.0f) < 0.05f);
+    assert(std::abs(eulerHand75.rollDeg) < 0.05f);
 
     sensors.UpdateFrame(0.016);
     const auto& snap = sensors.GetSnapshot();
