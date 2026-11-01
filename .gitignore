@@ -1,0 +1,25 @@
+# Build directories
+build/
+build_*/
+out/
+dist/
+
+# Local auto-installed toolchains & caches
+.android-sdk/
+.emsdk/
+.gradle/
+.cache/
+android/.gradle/
+android/app/.cxx/
+android/app/build/
+android/build/
+android/local.properties
+
+# IDE & Clangd
+.vscode/
+.idea/
+compile_commands.json
+*.user
+*.suo
+*.VC.db
+*.VC.opendb

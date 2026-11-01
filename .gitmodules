@@ -1,0 +1,4 @@
+[submodule "third_party/guikit"]
+	path = third_party/guikit
+	url = git@github.com:guikit/guikit.git
+	branch = mobile
