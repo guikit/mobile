@@ -29,12 +29,15 @@ scripts\windows\desktop-build.cmd
 scripts\windows\desktop-run.cmd
 ```
 
-### 2. Install Android SDK & NDK + Build Android Native Binary (`arm64-v8a`)
-No manual Android Studio installation is required. Run `android-sdk-install.cmd` once to automatically download Portable OpenJDK 17, Google Android Command-Line Tools, Platform 34, and Android NDK r27 LTS into the standard Windows SDK path `%LOCALAPPDATA%\Android\Sdk` (and configure `ANDROID_HOME` / `ANDROID_NDK_HOME`), then run `android-build.cmd`:
+### 2. Install Android SDK & NDK + Build & Deploy Android APK (`arm64-v8a`)
+No manual Android Studio installation is required. Run `android-sdk-install.cmd` once to automatically download Portable OpenJDK 17, Google Android Command-Line Tools, Platform 34, and Android NDK r27 LTS into the standard Windows SDK path `%LOCALAPPDATA%\Android\Sdk` (and configure `ANDROID_HOME` / `ANDROID_NDK_HOME`), then build and deploy:
 ```cmd
 :: Step 1: Install/verify Android SDK & NDK in %LOCALAPPDATA%\Android\Sdk
 scripts\windows\android-sdk-install.cmd
 
-:: Step 2: Cross-compile libmain.so for Android (arm64-v8a)
+:: Step 2: Cross-compile libmain.so and package signed guikit_mobile_demo.apk
 scripts\windows\android-build.cmd
+
+:: Step 3: Install APK via ADB onto a connected Android phone, grant permissions, and launch
+scripts\windows\android-install.cmd
 ```
