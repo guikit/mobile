@@ -96,92 +96,35 @@ void RenderStatusBar(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
     }
 }
 
-void RenderHorizonTab(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
+void RenderHorizonTab(Context& ui, MobileRuntime& runtime, MobileAppState& /*app*/) {
     const auto& snap = runtime.Sensors().GetSnapshot();
 
     if (auto col = ui.Column({
-        .gap = 8.0f,
-        .padding = Padding::All(8.0f),
+        .padding = Padding::All(6.0f),
         .widthMode = SizeMode::Stretch,
         .heightMode = SizeMode::Stretch
     })) {
-        if (auto card = ui.Card({
-            .gap = 8.0f,
-            .padding = Padding::All(10.0f),
-            .widthMode = SizeMode::Stretch,
+        ui.AttitudeView({
+            .displayMode = AttitudeDisplayMode::FullPFD,
+            .viewportMode = AttitudeViewportMode::FullBleed,
+            .colorScheme = AttitudeColorScheme::GlassCockpit,
+            .flightDirectorStyle = FlightDirectorStyle::Off,
+            .rollDeg = snap.attitude.rollDeg,
+            .pitchDeg = snap.attitude.pitchDeg,
+            .headingDeg = snap.attitude.headingDeg,
+            .slipSkid = snap.slipSkid,
+            .gLoad = snap.gLoad,
+            .radioAltitudeFeet = 99999.0f,
+            .showFlightPathVector = false,
+            .showIlsDiamonds = false,
+            .showPitchLadder = true,
+            .showBankScale = true,
+            .showSpeedAndAltTapes = false,
+            .showHeadingTape = true,
+            .showFmaBar = false,
+            .showMouseStickOverlay = false,
             .heightMode = SizeMode::Stretch
-        })) {
-            if (auto hdr = ui.Row({.gap = 6.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
-                ui.Size(UiSize::Sm).Heading({
-                    .label = "Artificial Horizon",
-                    .icon = Icon::Play()
-                });
-                ui.Spacer();
-                const bool isHandheld = (runtime.Sensors().GetAttitudeReference() == AttitudeReference::Handheld);
-                if (ui.Size(UiSize::Xs).Button({
-                    .text = isHandheld ? "Ref: Hand" : "Ref: Table",
-                    .color = isHandheld ? StateColor::Primary() : StateColor{}
-                }).clicked) {
-                    runtime.Sensors().SetAttitudeReference(
-                        isHandheld ? AttitudeReference::FlatTable : AttitudeReference::Handheld
-                    );
-                    runtime.System().TriggerHaptic(HapticStyle::Selection);
-                }
-                if (ui.Size(UiSize::Xs).Button({
-                    .text = runtime.Sensors().HasAttitudeTare() ? "Reset 0°" : "Zero 0°",
-                    .color = runtime.Sensors().HasAttitudeTare() ? StateColor::Warning() : StateColor{}
-                }).clicked) {
-                    if (runtime.Sensors().HasAttitudeTare()) {
-                        runtime.Sensors().ResetAttitudeTare();
-                    } else {
-                        runtime.Sensors().TareAttitude();
-                    }
-                    runtime.System().TriggerHaptic(HapticStyle::Medium);
-                }
-                if (ui.Size(UiSize::Xs).Button({
-                    .text = app.fullBleedHorizon ? "Full" : "Bezel",
-                    .color = app.fullBleedHorizon ? StateColor::Primary() : StateColor{}
-                }).clicked) {
-                    app.fullBleedHorizon = !app.fullBleedHorizon;
-                    runtime.System().TriggerHaptic(HapticStyle::Light);
-                }
-                if (ui.Size(UiSize::Xs).Button({
-                    .text = app.compactAdiMode ? "ADI" : "PFD",
-                    .icon = Icon::Refresh()
-                }).clicked) {
-                    app.compactAdiMode = !app.compactAdiMode;
-                    runtime.System().TriggerHaptic(HapticStyle::Light);
-                }
-            }
-
-            ui.AttitudeView({
-                .displayMode = app.compactAdiMode ? AttitudeDisplayMode::CompactADI : AttitudeDisplayMode::FullPFD,
-                .viewportMode = app.fullBleedHorizon ? AttitudeViewportMode::FullBleed : AttitudeViewportMode::Auto,
-                .colorScheme = AttitudeColorScheme::GlassCockpit,
-                .rollDeg = snap.attitude.rollDeg,
-                .pitchDeg = snap.attitude.pitchDeg,
-                .headingDeg = snap.attitude.headingDeg,
-                .airspeedKnots = runtime.Location().GetLatestFix().SpeedKnots(),
-                .altitudeFeet = snap.barometricAltitudeMeters * 3.28084f,
-                .verticalSpeedFpm = snap.verticalSpeedMps * 196.85f,
-                .slipSkid = snap.slipSkid,
-                .gLoad = snap.gLoad,
-                .showIlsDiamonds = false,
-                .heightMode = SizeMode::Stretch
-            });
-
-            if (auto metrics = ui.Row({.gap = 6.0f, .widthMode = SizeMode::Stretch})) {
-                auto metricBox = [&](std::string_view title, std::string_view val, UiVariant var) {
-                    if (auto b = ui.Card({.gap = 2.0f, .padding = Padding::Symmetric(8.0f, 6.0f), .widthMode = SizeMode::Stretch})) {
-                        ui.Text(title, {.role = TextRole::LabelSmall, .variant = UiVariant::Muted});
-                        ui.Text(val, {.role = TextRole::CodeSmall, .variant = var});
-                    }
-                };
-                metricBox("PITCH / ROLL", ui.Format("{:+.1f}° / {:+.1f}°", snap.attitude.pitchDeg, snap.attitude.rollDeg), UiVariant::Info);
-                metricBox("HEADING", ui.Format("{:05.1f}°", snap.attitude.headingDeg), UiVariant::Primary);
-                metricBox("G-LOAD / ALT", ui.Format("{:.2f}G | {:.0f}m", snap.gLoad, snap.barometricAltitudeMeters), UiVariant::Success);
-            }
-        }
+        });
     }
 }
 
