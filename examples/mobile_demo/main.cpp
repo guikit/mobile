@@ -28,6 +28,7 @@ struct MobileAppState {
     size_t activeTab{0};
     bool showSimulatorDrawer{true};
     bool compactAdiMode{true};
+    bool fullBleedHorizon{true};
     int imuSignalAxis{3}; // 0=AccX, 1=AccY, 2=AccZ, 3=|G|, 4=Gyro, 5=Mag, 6=Baro
     ImageViewParams cameraViewParams{};
     GisRenderConfig gisConfig{};
@@ -138,6 +139,13 @@ void RenderHorizonTab(Context& ui, MobileRuntime& runtime, MobileAppState& app) 
                     runtime.System().TriggerHaptic(HapticStyle::Medium);
                 }
                 if (ui.Size(UiSize::Xs).Button({
+                    .text = app.fullBleedHorizon ? "Full" : "Bezel",
+                    .color = app.fullBleedHorizon ? StateColor::Primary() : StateColor{}
+                }).clicked) {
+                    app.fullBleedHorizon = !app.fullBleedHorizon;
+                    runtime.System().TriggerHaptic(HapticStyle::Light);
+                }
+                if (ui.Size(UiSize::Xs).Button({
                     .text = app.compactAdiMode ? "ADI" : "PFD",
                     .icon = Icon::Refresh()
                 }).clicked) {
@@ -148,6 +156,7 @@ void RenderHorizonTab(Context& ui, MobileRuntime& runtime, MobileAppState& app) 
 
             ui.AttitudeView({
                 .displayMode = app.compactAdiMode ? AttitudeDisplayMode::CompactADI : AttitudeDisplayMode::FullPFD,
+                .viewportMode = app.fullBleedHorizon ? AttitudeViewportMode::FullBleed : AttitudeViewportMode::Auto,
                 .colorScheme = AttitudeColorScheme::GlassCockpit,
                 .rollDeg = snap.attitude.rollDeg,
                 .pitchDeg = snap.attitude.pitchDeg,
