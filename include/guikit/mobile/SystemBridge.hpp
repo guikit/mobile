@@ -49,6 +49,8 @@ public:
 
     // --- Safe Area Insets & Screen Orientation ---
     [[nodiscard]] SafeAreaInsets GetSafeAreaInsets() const noexcept { return m_safeArea; }
+    [[nodiscard]] ScreenOrientation GetScreenOrientation() const noexcept { return m_screenOrientation; }
+    void SetScreenOrientation(ScreenOrientation orientation) noexcept { m_screenOrientation = orientation; }
     void SetSimulateMobileCutout(bool enabled) noexcept { m_simulateCutout = enabled; }
     [[nodiscard]] bool IsSimulatingMobileCutout() const noexcept { return m_simulateCutout; }
 
@@ -69,6 +71,7 @@ private:
     void* m_haptic{nullptr};
     DeviceInfo m_deviceInfo{};
     SafeAreaInsets m_safeArea{};
+    ScreenOrientation m_screenOrientation{ScreenOrientation::Portrait};
     BatteryStatus m_battery{};
     std::array<PermissionStatus, 7> m_permissions{};
 

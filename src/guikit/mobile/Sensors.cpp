@@ -1,6 +1,6 @@
 #include "guikit/mobile/Sensors.hpp"
-#include <SDL3/SDL.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <numbers>
 
@@ -101,6 +101,10 @@ struct SensorManager::AndroidImpl {
     std::array<const ASensor*, static_cast<size_t>(SensorType::Count)> sensors{};
     Vec3 filteredAccel{0.0f, kGravityStandard, 0.0f};
     bool hasFilteredAccel{false};
+    int64_t lastAccelTimestampNs{0};
+    int64_t lastBaroTimestampNs{0};
+    float prevBaroAltitudeMeters{0.0f};
+    bool hasPrevBaroAltitude{false};
     uint64_t initialStepOffset{0};
     bool hasInitialSteps{false};
 #endif
@@ -151,7 +155,11 @@ bool SensorManager::Initialize() {
     initDefaultInfo(SensorType::StepCounter,        "Hardware Pedometer",       100000.0f, 1.0f);
 
 #ifdef __ANDROID__
+#if __ANDROID_API__ >= 26
+    m_android->manager = ASensorManager_getInstanceForPackage("org.guikit.mobile");
+#else
     m_android->manager = ASensorManager_getInstance();
+#endif
     if (m_android->manager) {
         m_android->looper = ALooper_forThread();
         if (!m_android->looper) {
@@ -297,6 +305,9 @@ void SensorManager::SetSamplingRate(SensorRate rate) {
 }
 
 float SensorManager::GetEstimatedSampleRateHz() const noexcept {
+    if (!IsUsingSimulator() && m_measuredSampleRateHz >= 5.0f) {
+        return m_measuredSampleRateHz;
+    }
     switch (m_rate) {
         case SensorRate::Ui:      return 16.6f;
         case SensorRate::Normal:  return 50.0f;
@@ -316,10 +327,10 @@ void SensorManager::UpdateFrame(double dtSeconds) {
     const double clampedDt = std::clamp(dtSeconds, 0.001, 0.1);
     if (IsUsingSimulator()) {
         StepSimulator(clampedDt);
+        PushHistorySample(m_snapshot);
     } else {
         PollAndroidSensors();
     }
-    PushHistorySample(m_snapshot);
 }
 
 void SensorManager::PollAndroidSensors() {
@@ -328,17 +339,16 @@ void SensorManager::PollAndroidSensors() {
 
     ASensorEvent ev{};
     bool gotEvent = false;
-    const float prevAlt = m_snapshot.barometricAltitudeMeters;
+    bool pushedAccelHistory = false;
 
-    // Remap physical sensor axes to current screen orientation (Portrait vs Landscape)
-    const SDL_DisplayID displayId = SDL_GetPrimaryDisplay();
-    const SDL_DisplayOrientation dispOrient = displayId ? SDL_GetCurrentDisplayOrientation(displayId) : SDL_ORIENTATION_PORTRAIT;
-    const auto remapToScreen = [dispOrient](float x, float y, float z) noexcept -> Vec3 {
-        switch (dispOrient) {
-            case SDL_ORIENTATION_LANDSCAPE:         return {-y,  x, z}; // 90 deg CCW (ROTATION_90)
-            case SDL_ORIENTATION_LANDSCAPE_FLIPPED: return { y, -x, z}; // 90 deg CW  (ROTATION_270)
-            case SDL_ORIENTATION_PORTRAIT_FLIPPED:  return {-x, -y, z}; // 180 deg    (ROTATION_180)
-            default:                                return { x,  y, z}; // Portrait   (ROTATION_0)
+    // Remap physical MEMS sensor axes to active screen orientation (Portrait vs Landscape)
+    const ScreenOrientation orient = m_screenOrientation;
+    const auto remapToScreen = [orient](float x, float y, float z) noexcept -> Vec3 {
+        switch (orient) {
+            case ScreenOrientation::LandscapeLeft:      return {-y,  x, z}; // 90 deg CCW (ROTATION_90)
+            case ScreenOrientation::LandscapeRight:     return { y, -x, z}; // 90 deg CW  (ROTATION_270)
+            case ScreenOrientation::PortraitUpsideDown: return {-x, -y, z}; // 180 deg    (ROTATION_180)
+            default:                                    return { x,  y, z}; // Portrait   (ROTATION_0)
         }
     };
 
@@ -354,16 +364,31 @@ void SensorManager::PollAndroidSensors() {
                 m_snapshot.gLoad = m_snapshot.accelerometer.Magnitude() / kGravityStandard;
                 m_snapshot.slipSkid = std::clamp(-m_snapshot.accelerometer.x / kGravityStandard, -1.0f, 1.0f);
 
-                // Smooth low-pass filter on hardware MEMS accelerometer to eliminate hand tremor
-                // while remaining 100% immune to vendor pseudo-gyro / RotationVector 45-deg flips
-                constexpr float kAccelSmoothing = 0.22f;
+                // Compute hardware sample delta dt from CLOCK_BOOTTIME nanosecond timestamps
+                float dtAccel = 0.01f;
+                if (m_android->lastAccelTimestampNs > 0 && ev.timestamp > m_android->lastAccelTimestampNs) {
+                    const float rawDt = static_cast<float>(ev.timestamp - m_android->lastAccelTimestampNs) * 1e-9f;
+                    if (rawDt >= 0.0005f && rawDt <= 0.25f) {
+                        dtAccel = rawDt;
+                        const float instRateHz = std::clamp(1.0f / rawDt, 5.0f, 500.0f);
+                        m_measuredSampleRateHz = (m_measuredSampleRateHz <= 0.0f)
+                            ? instRateHz
+                            : (m_measuredSampleRateHz + 0.05f * (instRateHz - m_measuredSampleRateHz));
+                    }
+                }
+                m_android->lastAccelTimestampNs = ev.timestamp;
+
+                // Continuous-time first-order low-pass filter (time constant tau = 35 ms -> ~4.5 Hz cutoff)
+                // Ensures identical physical damping regardless of sensor polling rate (50 Hz vs 200 Hz)
+                constexpr float kFilterTauSec = 0.035f;
+                const float alpha = dtAccel / (kFilterTauSec + dtAccel);
                 if (!m_android->hasFilteredAccel) {
                     m_android->filteredAccel = m_snapshot.accelerometer;
                     m_android->hasFilteredAccel = true;
                 } else {
-                    m_android->filteredAccel.x += kAccelSmoothing * (m_snapshot.accelerometer.x - m_android->filteredAccel.x);
-                    m_android->filteredAccel.y += kAccelSmoothing * (m_snapshot.accelerometer.y - m_android->filteredAccel.y);
-                    m_android->filteredAccel.z += kAccelSmoothing * (m_snapshot.accelerometer.z - m_android->filteredAccel.z);
+                    m_android->filteredAccel.x += alpha * (m_snapshot.accelerometer.x - m_android->filteredAccel.x);
+                    m_android->filteredAccel.y += alpha * (m_snapshot.accelerometer.y - m_android->filteredAccel.y);
+                    m_android->filteredAccel.z += alpha * (m_snapshot.accelerometer.z - m_android->filteredAccel.z);
                 }
 
                 const Vec3& g = m_android->filteredAccel;
@@ -371,8 +396,6 @@ void SensorManager::PollAndroidSensors() {
                 const float yzMag = std::sqrt(g.y * g.y + g.z * g.z);
                 if (m_attitudeRef == AttitudeReference::Handheld) {
                     // Real Artificial Horizon (Vertical in hand = 0 deg Horizon, Flat on table = -90 deg, Sky = +90 deg)
-                    // Non-negative xyMag denominator ensures Pitch stays strictly in [0, +90] whenever g.z < 0 (Blue Sky)
-                    // and strictly in [-90, 0] whenever g.z > 0 (Brown Ground), never jumping at 45 deg!
                     m_rawUntaredPitchDeg = std::clamp(std::atan2(-g.z, xyMag) * kRadToDeg, -90.0f, 90.0f);
                 } else {
                     // Flat on table = 0 deg
@@ -390,6 +413,10 @@ void SensorManager::PollAndroidSensors() {
                     m_snapshot.attitude.rollDeg,
                     m_snapshot.attitude.yawDeg
                 );
+
+                // Record every hardware accelerometer sample at full sensor rate for STFT vibration analysis
+                PushHistorySample(m_snapshot);
+                pushedAccelHistory = true;
                 break;
             }
 
@@ -431,11 +458,24 @@ void SensorManager::PollAndroidSensors() {
                 break;
             }
 
-            case kAndroidTypePressure:
+            case kAndroidTypePressure: {
+                const float newAlt = PressureToAltitudeMeters(ev.pressure, m_seaLevelPressureHpa);
+                if (m_android->hasPrevBaroAltitude && m_android->lastBaroTimestampNs > 0 &&
+                    ev.timestamp > m_android->lastBaroTimestampNs) {
+                    const float dtBaro = static_cast<float>(ev.timestamp - m_android->lastBaroTimestampNs) * 1e-9f;
+                    if (dtBaro >= 0.005f && dtBaro <= 2.0f) {
+                        const float rawVs = (newAlt - m_android->prevBaroAltitudeMeters) / dtBaro;
+                        m_snapshot.verticalSpeedMps += 0.25f * (rawVs - m_snapshot.verticalSpeedMps);
+                    }
+                }
+                m_android->prevBaroAltitudeMeters = newAlt;
+                m_android->lastBaroTimestampNs = ev.timestamp;
+                m_android->hasPrevBaroAltitude = true;
                 m_snapshot.pressureHpa = ev.pressure;
                 m_snapshot.seaLevelPressureHpa = m_seaLevelPressureHpa;
-                m_snapshot.barometricAltitudeMeters = PressureToAltitudeMeters(ev.pressure, m_seaLevelPressureHpa);
+                m_snapshot.barometricAltitudeMeters = newAlt;
                 break;
+            }
 
             case kAndroidTypeLight:
                 m_snapshot.ambientLightLux = ev.light;
@@ -464,7 +504,9 @@ void SensorManager::PollAndroidSensors() {
 
     if (gotEvent) {
         ++m_snapshot.sampleSequence;
-        m_snapshot.verticalSpeedMps = (m_snapshot.barometricAltitudeMeters - prevAlt) * 30.0f;
+        if (!pushedAccelHistory) {
+            PushHistorySample(m_snapshot);
+        }
     }
 #endif
 }
@@ -483,7 +525,10 @@ void SensorManager::StepSimulator(double dtSeconds) {
         yawDeg    = std::fmod(m_simConfig.manualHeadingDeg + t * 6.0f + 360.0f, 360.0f);
     }
 
-    m_snapshot.timestampNs = SDL_GetTicksNS();
+    const auto nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+    m_snapshot.timestampNs = static_cast<uint64_t>(std::max<int64_t>(0, nowNs));
     ++m_snapshot.sampleSequence;
 
     m_snapshot.attitudeQuat = EulerToQuaternion(pitchDeg, rollDeg, yawDeg);

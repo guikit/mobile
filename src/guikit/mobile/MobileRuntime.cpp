@@ -90,6 +90,7 @@ void MobileRuntime::UpdateFrame(double dtSeconds, Context& ui) {
 
     m_system.UpdateFrame(dtSeconds);
     m_touch.UpdateFrame(dtSeconds, ui);
+    m_sensors.SetScreenOrientation(m_system.GetScreenOrientation());
     m_sensors.UpdateFrame(dtSeconds);
     m_camera.UpdateFrame(dtSeconds, m_renderer);
     m_location.UpdateFrame(dtSeconds);

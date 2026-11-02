@@ -239,6 +239,25 @@ void SystemBridge::UpdateSafeArea() {
 
     if (m_window) {
         auto* sdlWin = static_cast<SDL_Window*>(m_window);
+        const SDL_DisplayID displayId = SDL_GetDisplayForWindow(sdlWin);
+        const SDL_DisplayOrientation dispOrient = displayId
+            ? SDL_GetCurrentDisplayOrientation(displayId)
+            : SDL_GetCurrentDisplayOrientation(SDL_GetPrimaryDisplay());
+        switch (dispOrient) {
+            case SDL_ORIENTATION_LANDSCAPE:
+                m_screenOrientation = ScreenOrientation::LandscapeLeft;
+                break;
+            case SDL_ORIENTATION_LANDSCAPE_FLIPPED:
+                m_screenOrientation = ScreenOrientation::LandscapeRight;
+                break;
+            case SDL_ORIENTATION_PORTRAIT_FLIPPED:
+                m_screenOrientation = ScreenOrientation::PortraitUpsideDown;
+                break;
+            default:
+                m_screenOrientation = ScreenOrientation::Portrait;
+                break;
+        }
+
         SDL_Rect safeRect{};
         int winW = 0;
         int winH = 0;

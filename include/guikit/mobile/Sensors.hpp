@@ -140,6 +140,10 @@ public:
     void SetAttitudeReference(AttitudeReference ref) noexcept;
     [[nodiscard]] AttitudeReference GetAttitudeReference() const noexcept { return m_attitudeRef; }
 
+    /// Sets the active display orientation so physical MEMS sensor axes are remapped to screen space.
+    void SetScreenOrientation(ScreenOrientation orientation) noexcept { m_screenOrientation = orientation; }
+    [[nodiscard]] ScreenOrientation GetScreenOrientation() const noexcept { return m_screenOrientation; }
+
     /// Zeros (tares) Pitch and Roll to the current device posture, or clears the tare offset.
     void TareAttitude() noexcept;
     void ResetAttitudeTare() noexcept;
@@ -181,6 +185,8 @@ private:
 
     SensorRate m_rate{SensorRate::Game};
     AttitudeReference m_attitudeRef{AttitudeReference::Handheld};
+    ScreenOrientation m_screenOrientation{ScreenOrientation::Portrait};
+    float m_measuredSampleRateHz{0.0f};
     bool m_hasAttitudeTare{false};
     float m_pitchTareDeg{0.0f};
     float m_rollTareDeg{0.0f};
