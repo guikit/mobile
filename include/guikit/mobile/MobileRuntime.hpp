@@ -1,6 +1,5 @@
 #pragma once
 
-#include <SDL3/SDL.h>
 #include "guikit/Context.hpp"
 #include "guikit/mobile/AudioCapture.hpp"
 #include "guikit/mobile/Camera.hpp"
@@ -14,7 +13,7 @@ namespace guikit::mobile {
 
 /// Unified Mobile Hardware & Lifecycle Runtime for GuiKit applications.
 /// Aggregates Sensors, Camera, GNSS Location, Microphone Audio Capture, System Bridge (Permissions/Haptics/SafeArea),
-/// and Multi-Touch Gesture recognition into a single lifecycle-aware coordinator.
+/// and Multi-Touch Gesture recognition into a single backend-agnostic lifecycle coordinator.
 class MobileRuntime {
 public:
     MobileRuntime() = default;
@@ -24,12 +23,17 @@ public:
     MobileRuntime& operator=(const MobileRuntime&) = delete;
 
     /// Initializes all mobile subsystems.
-    bool Initialize(SDL_Window* window = nullptr, SDL_Renderer* renderer = nullptr);
+    bool Initialize(void* nativeWindowHandle = nullptr, void* nativeRendererHandle = nullptr);
     void Shutdown();
 
-    /// Handles SDL3 lifecycle (`SDL_EVENT_WILL_ENTER_BACKGROUND`, `SDL_EVENT_DID_ENTER_FOREGROUND`),
-    /// Android back button (`SDL_SCANCODE_AC_BACK`), and multi-touch gesture translation.
-    bool ProcessEvent(const SDL_Event& ev, Context& ui, Vec2 viewportSizePx);
+    /// Backend-agnostic mobile lifecycle and system navigation hooks.
+    void OnEnterBackground();
+    void OnEnterForeground(Context& ui);
+    void OnBackNavigation(Context& ui);
+
+    /// Handles a native platform event (e.g. `const SDL_Event*`) for background/foreground transitions,
+    /// Android hardware/gesture Back button, and multi-touch gesture translation.
+    bool ProcessEvent(const void* nativeEvent, Context& ui, Vec2 viewportSizePx);
 
     /// Updates all active hardware/simulator subsystems for the current frame.
     /// Automatically requests a UI repaint (`ui.RequestRepaint(1)`) when live sensor/camera/audio streaming is active.
@@ -57,8 +61,8 @@ public:
     [[nodiscard]] const TouchGestureRecognizer& Touch() const noexcept { return m_touch; }
 
 private:
-    SDL_Window* m_window{nullptr};
-    SDL_Renderer* m_renderer{nullptr};
+    void* m_window{nullptr};
+    void* m_renderer{nullptr};
     SensorManager m_sensors{};
     CameraService m_camera{};
     LocationService m_location{};

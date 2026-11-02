@@ -1,4 +1,5 @@
 #include "guikit/mobile/SystemBridge.hpp"
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -30,9 +31,9 @@ SystemBridge::~SystemBridge() {
     Shutdown();
 }
 
-bool SystemBridge::Initialize(SDL_Window* window) {
+bool SystemBridge::Initialize(void* nativeWindowHandle) {
     if (m_initialized) return true;
-    m_window = window;
+    m_window = nativeWindowHandle;
 
 #ifdef __ANDROID__
     m_deviceInfo.platformName = "Android";
@@ -57,7 +58,7 @@ bool SystemBridge::Initialize(SDL_Window* window) {
     if (SDL_InitSubSystem(SDL_INIT_HAPTIC)) {
         m_haptic = SDL_OpenHapticFromMouse();
         if (m_haptic) {
-            SDL_InitHapticRumble(m_haptic);
+            SDL_InitHapticRumble(static_cast<SDL_Haptic*>(m_haptic));
         }
     }
 
@@ -69,7 +70,7 @@ bool SystemBridge::Initialize(SDL_Window* window) {
 
 void SystemBridge::Shutdown() {
     if (m_haptic) {
-        SDL_CloseHaptic(m_haptic);
+        SDL_CloseHaptic(static_cast<SDL_Haptic*>(m_haptic));
         m_haptic = nullptr;
     }
     m_initialized = false;
@@ -194,7 +195,7 @@ void SystemBridge::VibrateMs(uint32_t durationMs) {
     ++m_hapticCount;
 
     if (m_haptic) {
-        SDL_PlayHapticRumble(m_haptic, 0.65f, durationMs);
+        SDL_PlayHapticRumble(static_cast<SDL_Haptic*>(m_haptic), 0.65f, durationMs);
     }
 
 #ifdef __ANDROID__
@@ -237,18 +238,19 @@ void SystemBridge::UpdateSafeArea() {
     m_safeArea = {};
 
     if (m_window) {
+        auto* sdlWin = static_cast<SDL_Window*>(m_window);
         SDL_Rect safeRect{};
         int winW = 0;
         int winH = 0;
-        SDL_GetWindowSizeInPixels(m_window, &winW, &winH);
-        if (SDL_GetWindowSafeArea(m_window, &safeRect) && winW > 0 && winH > 0) {
+        SDL_GetWindowSizeInPixels(sdlWin, &winW, &winH);
+        if (SDL_GetWindowSafeArea(sdlWin, &safeRect) && winW > 0 && winH > 0) {
             m_safeArea.left   = static_cast<float>(std::max(0, safeRect.x));
             m_safeArea.top    = static_cast<float>(std::max(0, safeRect.y));
             m_safeArea.right  = static_cast<float>(std::max(0, winW - (safeRect.x + safeRect.w)));
             m_safeArea.bottom = static_cast<float>(std::max(0, winH - (safeRect.y + safeRect.h)));
         }
 #ifdef __ANDROID__
-        const float dpi = std::max(1.0f, SDL_GetWindowDisplayScale(m_window));
+        const float dpi = std::max(1.0f, SDL_GetWindowDisplayScale(sdlWin));
         m_safeArea.top = std::max(m_safeArea.top, 44.0f * dpi);
         if (winH >= winW) {
             m_safeArea.bottom = std::max(m_safeArea.bottom, 50.0f * dpi);
@@ -281,15 +283,16 @@ void SystemBridge::UpdateBatteryInfo() {
 
 void SystemBridge::SetSoftKeyboardVisible(bool visible) {
     if (!m_window) return;
+    auto* sdlWin = static_cast<SDL_Window*>(m_window);
     if (visible) {
-        SDL_StartTextInput(m_window);
+        SDL_StartTextInput(sdlWin);
     } else {
-        SDL_StopTextInput(m_window);
+        SDL_StopTextInput(sdlWin);
     }
 }
 
 bool SystemBridge::IsSoftKeyboardVisible() const noexcept {
-    return m_window ? SDL_TextInputActive(m_window) : false;
+    return m_window ? SDL_TextInputActive(static_cast<SDL_Window*>(m_window)) : false;
 }
 
 void SystemBridge::ShowNativeToast(std::string_view message, bool longDuration) {

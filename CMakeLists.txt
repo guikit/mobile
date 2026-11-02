@@ -37,6 +37,8 @@ set(GUIKIT_MOBILE_SOURCES
     src/guikit/mobile/SystemBridge.cpp
     src/guikit/mobile/TouchGesture.cpp
     src/guikit/mobile/MobileRuntime.cpp
+    src/guikit/mobile/MobileWindow.cpp
+    src/guikit/mobile/SdlMobileWindowBackend.cpp
 )
 
 add_library(guikit_mobile STATIC ${GUIKIT_MOBILE_SOURCES})

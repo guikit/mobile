@@ -1,4 +1,5 @@
 #include "guikit/mobile/MobileRuntime.hpp"
+#include <SDL3/SDL.h>
 
 namespace guikit::mobile {
 
@@ -6,13 +7,13 @@ MobileRuntime::~MobileRuntime() {
     Shutdown();
 }
 
-bool MobileRuntime::Initialize(SDL_Window* window, SDL_Renderer* renderer) {
+bool MobileRuntime::Initialize(void* nativeWindowHandle, void* nativeRendererHandle) {
     if (m_initialized) return true;
 
-    m_window = window;
-    m_renderer = renderer;
+    m_window = nativeWindowHandle;
+    m_renderer = nativeRendererHandle;
 
-    m_system.Initialize(window);
+    m_system.Initialize(m_window);
     m_sensors.Initialize();
     m_camera.Initialize();
     m_location.Initialize();
@@ -34,35 +35,50 @@ void MobileRuntime::Shutdown() {
     m_initialized = false;
 }
 
-bool MobileRuntime::ProcessEvent(const SDL_Event& ev, Context& ui, Vec2 viewportSizePx) {
+void MobileRuntime::OnEnterBackground() {
+    m_inBackground = true;
+    m_sensors.SetPaused(true);
+    m_camera.SetPaused(true);
+    m_audio.SetCapturing(false);
+}
+
+void MobileRuntime::OnEnterForeground(Context& ui) {
+    m_inBackground = false;
+    m_sensors.SetPaused(false);
+    m_camera.SetPaused(false);
+    m_audio.SetCapturing(true);
+    ui.InvalidateAll();
+    ui.RequestRepaint(3);
+}
+
+void MobileRuntime::OnBackNavigation(Context& ui) {
+    ui.OnKeyDown(Key::Escape);
+    m_system.TriggerHaptic(HapticStyle::Selection);
+}
+
+bool MobileRuntime::ProcessEvent(const void* nativeEvent, Context& ui, Vec2 viewportSizePx) {
+    if (!nativeEvent) return false;
+    const auto& ev = *static_cast<const SDL_Event*>(nativeEvent);
+
     // 1. Mobile application background/foreground lifecycle
     if (ev.type == SDL_EVENT_WILL_ENTER_BACKGROUND || ev.type == SDL_EVENT_DID_ENTER_BACKGROUND) {
-        m_inBackground = true;
-        m_sensors.SetPaused(true);
-        m_camera.SetPaused(true);
-        m_audio.SetCapturing(false);
+        OnEnterBackground();
         return true;
     }
 
     if (ev.type == SDL_EVENT_WILL_ENTER_FOREGROUND || ev.type == SDL_EVENT_DID_ENTER_FOREGROUND) {
-        m_inBackground = false;
-        m_sensors.SetPaused(false);
-        m_camera.SetPaused(false);
-        m_audio.SetCapturing(true);
-        ui.InvalidateAll();
-        ui.RequestRepaint(3);
+        OnEnterForeground(ui);
         return true;
     }
 
     // 2. Android hardware/gesture Back button -> Escape key in GuiKit (closes modals/popovers)
     if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.scancode == SDL_SCANCODE_AC_BACK) {
-        ui.OnKeyDown(Key::Escape);
-        m_system.TriggerHaptic(HapticStyle::Selection);
+        OnBackNavigation(ui);
         return true;
     }
 
     // 3. Multi-touch finger gestures (kinetic scroll, pinch-to-zoom, long-press)
-    if (m_touch.ProcessSdlEvent(ev, ui, viewportSizePx)) {
+    if (m_touch.ProcessSdlEvent(&ev, ui, viewportSizePx)) {
         return true;
     }
 

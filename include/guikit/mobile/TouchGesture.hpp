@@ -2,7 +2,7 @@
 
 #include <array>
 #include <cstdint>
-#include <SDL3/SDL.h>
+#include <span>
 #include "guikit/Context.hpp"
 #include "guikit/mobile/Types.hpp"
 
@@ -10,7 +10,7 @@ namespace guikit::mobile {
 
 /// Active touch point tracked by `TouchGestureRecognizer`.
 struct TouchContact {
-    SDL_FingerID fingerId{0};
+    uint64_t fingerId{0};
     Vec2 posPx{0.0f, 0.0f};        ///< Current position in window logical coordinates
     Vec2 startPosPx{0.0f, 0.0f};   ///< Initial touch-down position
     Vec2 velocityPxPerSec{0.0f, 0.0f};
@@ -42,9 +42,14 @@ public:
     TouchGestureRecognizer() = default;
     ~TouchGestureRecognizer() = default;
 
-    /// Processes an SDL3 event and dispatches translated pointer/scroll/zoom events to `guikit::Context`.
+    /// Backend-agnostic touch contact lifecycle handlers (coordinates in window pixel space).
+    void OnTouchDown(uint64_t fingerId, Vec2 posPx, Context& ui);
+    void OnTouchMove(uint64_t fingerId, Vec2 posPx, Vec2 deltaPx, Context& ui);
+    void OnTouchUp(uint64_t fingerId, Vec2 posPx, Context& ui);
+
+    /// Processes a native platform event (`const SDL_Event*`) and dispatches translated pointer/scroll/zoom events.
     /// Returns true if the event was consumed or modified by the mobile gesture recognizer.
-    bool ProcessSdlEvent(const SDL_Event& ev, Context& ui, Vec2 viewportSizePx);
+    bool ProcessSdlEvent(const void* sdlEvent, Context& ui, Vec2 viewportSizePx);
 
     /// Steps inertial scroll momentum and long-press timers once per frame before `ui.BeginFrame(...)`.
     void UpdateFrame(double dtSeconds, Context& ui);
@@ -56,8 +61,8 @@ public:
     [[nodiscard]] bool IsInertialScrollEnabled() const noexcept { return m_inertialEnabled; }
 
 private:
-    TouchContact* FindOrAllocateContact(SDL_FingerID id);
-    TouchContact* FindContact(SDL_FingerID id);
+    TouchContact* FindOrAllocateContact(uint64_t id);
+    TouchContact* FindContact(uint64_t id);
     uint32_t CountActiveContacts() const noexcept;
 
     std::array<TouchContact, kMaxContacts> m_contacts{};

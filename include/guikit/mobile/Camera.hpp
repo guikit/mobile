@@ -5,7 +5,6 @@
 #include <span>
 #include <string>
 #include <vector>
-#include <SDL3/SDL.h>
 #include "guikit/mobile/Types.hpp"
 #include "guikit/widgets/ImageView.hpp"
 
@@ -29,7 +28,7 @@ enum class FlashMode : uint8_t {
 /// Descriptor for an available camera device.
 struct CameraDeviceInfo {
     uint32_t deviceIndex{0};
-    SDL_CameraID sdlCameraId{0};
+    uint32_t sdlCameraId{0};
     std::string androidCameraId{};
     std::string name{};
     CameraFacing facing{CameraFacing::Back};
@@ -83,7 +82,7 @@ public:
     bool SwitchCameraFacing();
 
     /// Acquires the latest video frame, updates RGB888 buffer for `guikit::ImageView` and GPU texture.
-    void UpdateFrame(double dtSeconds, SDL_Renderer* renderer = nullptr);
+    void UpdateFrame(double dtSeconds, void* nativeRenderer = nullptr);
 
     /// Returns list of available camera devices.
     [[nodiscard]] std::span<const CameraDeviceInfo> GetDevices() const noexcept { return m_devices; }
@@ -136,8 +135,8 @@ private:
 
     std::vector<CameraDeviceInfo> m_devices;
     size_t m_activeDeviceIndex{0};
-    SDL_Camera* m_sdlCamera{nullptr};
-    SDL_Texture* m_previewTexture{nullptr};
+    void* m_sdlCamera{nullptr};
+    void* m_previewTexture{nullptr};
 
     uint32_t m_frameWidth{480};
     uint32_t m_frameHeight{640};

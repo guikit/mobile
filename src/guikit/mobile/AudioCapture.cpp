@@ -1,4 +1,5 @@
 #include "guikit/mobile/AudioCapture.hpp"
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -72,7 +73,7 @@ bool AudioCapture::Initialize(uint32_t sampleRate) {
             nullptr
         );
         if (m_audioStream) {
-            SDL_ResumeAudioStreamDevice(m_audioStream);
+            SDL_ResumeAudioStreamDevice(static_cast<SDL_AudioStream*>(m_audioStream));
             m_usingSynthetic = false;
         } else {
             m_usingSynthetic = true;
@@ -89,7 +90,7 @@ bool AudioCapture::Initialize(uint32_t sampleRate) {
 
 void AudioCapture::Shutdown() {
     if (m_audioStream) {
-        SDL_DestroyAudioStream(m_audioStream);
+        SDL_DestroyAudioStream(static_cast<SDL_AudioStream*>(m_audioStream));
         m_audioStream = nullptr;
     }
     m_initialized = false;
@@ -99,10 +100,11 @@ void AudioCapture::Shutdown() {
 bool AudioCapture::SetCapturing(bool enabled) {
     m_capturing = enabled;
     if (m_audioStream) {
+        auto* stream = static_cast<SDL_AudioStream*>(m_audioStream);
         if (enabled) {
-            SDL_ResumeAudioStreamDevice(m_audioStream);
+            SDL_ResumeAudioStreamDevice(stream);
         } else {
-            SDL_PauseAudioStreamDevice(m_audioStream);
+            SDL_PauseAudioStreamDevice(stream);
         }
     }
     return true;
@@ -115,12 +117,13 @@ void AudioCapture::UpdateFrame(double dtSeconds) {
     bool gotHardwareAudio = false;
 
     if (m_audioStream && !m_forceSynthetic) {
-        const int availBytes = SDL_GetAudioStreamAvailable(m_audioStream);
+        auto* stream = static_cast<SDL_AudioStream*>(m_audioStream);
+        const int availBytes = SDL_GetAudioStreamAvailable(stream);
         if (availBytes > 0) {
             const size_t availFloats = static_cast<size_t>(availBytes) / sizeof(float);
             std::vector<float> temp(std::min<size_t>(availFloats, kWaveformWindowSamples));
             const int readBytes = SDL_GetAudioStreamData(
-                m_audioStream,
+                stream,
                 temp.data(),
                 static_cast<int>(temp.size() * sizeof(float))
             );

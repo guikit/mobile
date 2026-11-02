@@ -1,4 +1,5 @@
 #include "guikit/mobile/Camera.hpp"
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -352,7 +353,7 @@ void CameraService::Shutdown() {
     }
 #endif
     if (m_previewTexture) {
-        SDL_DestroyTexture(m_previewTexture);
+        SDL_DestroyTexture(static_cast<SDL_Texture*>(m_previewTexture));
         m_previewTexture = nullptr;
     }
     m_devices.clear();
@@ -612,7 +613,7 @@ void CameraService::CloseCamera() {
     CloseAndroidCamera();
 #endif
     if (m_sdlCamera) {
-        SDL_CloseCamera(m_sdlCamera);
+        SDL_CloseCamera(static_cast<SDL_Camera*>(m_sdlCamera));
         m_sdlCamera = nullptr;
     }
     m_streaming = false;
@@ -648,9 +649,10 @@ const CameraDeviceInfo* CameraService::GetActiveDevice() const noexcept {
     return nullptr;
 }
 
-void CameraService::UpdateFrame(double dtSeconds, SDL_Renderer* renderer) {
+void CameraService::UpdateFrame(double dtSeconds, void* nativeRenderer) {
     if (!m_streaming || m_paused) return;
 
+    auto* renderer = static_cast<SDL_Renderer*>(nativeRenderer);
     bool gotHardwareFrame = false;
 
 #ifdef __ANDROID__
@@ -700,7 +702,7 @@ void CameraService::UpdateFrame(double dtSeconds, SDL_Renderer* renderer) {
                 m_rgbPixels.resize(static_cast<size_t>(m_frameWidth) * m_frameHeight * 3);
                 m_rgbaPixels.resize(static_cast<size_t>(m_frameWidth) * m_frameHeight);
                 if (m_previewTexture) {
-                    SDL_DestroyTexture(m_previewTexture);
+                    SDL_DestroyTexture(static_cast<SDL_Texture*>(m_previewTexture));
                     m_previewTexture = nullptr;
                 }
             }
@@ -762,8 +764,9 @@ void CameraService::UpdateFrame(double dtSeconds, SDL_Renderer* renderer) {
     }
 #else
     if (m_sdlCamera && !m_usingSynthetic) {
+        auto* sdlCam = static_cast<SDL_Camera*>(m_sdlCamera);
         Uint64 timestampNs = 0;
-        SDL_Surface* frameSurf = SDL_AcquireCameraFrame(m_sdlCamera, &timestampNs);
+        SDL_Surface* frameSurf = SDL_AcquireCameraFrame(sdlCam, &timestampNs);
         if (frameSurf) {
             SDL_Surface* rgbSurf = SDL_ConvertSurface(frameSurf, SDL_PIXELFORMAT_RGB24);
             if (rgbSurf) {
@@ -774,7 +777,7 @@ void CameraService::UpdateFrame(double dtSeconds, SDL_Renderer* renderer) {
                     m_rgbPixels.resize(static_cast<size_t>(m_frameWidth) * m_frameHeight * 3);
                     m_rgbaPixels.resize(static_cast<size_t>(m_frameWidth) * m_frameHeight);
                     if (m_previewTexture) {
-                        SDL_DestroyTexture(m_previewTexture);
+                        SDL_DestroyTexture(static_cast<SDL_Texture*>(m_previewTexture));
                         m_previewTexture = nullptr;
                     }
                 }
@@ -799,7 +802,7 @@ void CameraService::UpdateFrame(double dtSeconds, SDL_Renderer* renderer) {
                 SDL_DestroySurface(rgbSurf);
                 gotHardwareFrame = true;
             }
-            SDL_ReleaseCameraFrame(m_sdlCamera, frameSurf);
+            SDL_ReleaseCameraFrame(sdlCam, frameSurf);
         }
     }
 #endif
@@ -832,7 +835,7 @@ void CameraService::UpdateFrame(double dtSeconds, SDL_Renderer* renderer) {
             }
             if (m_previewTexture) {
                 SDL_UpdateTexture(
-                    m_previewTexture,
+                    static_cast<SDL_Texture*>(m_previewTexture),
                     nullptr,
                     m_rgbaPixels.data(),
                     static_cast<int>(m_frameWidth * sizeof(uint32_t))

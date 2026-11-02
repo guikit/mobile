@@ -9,3 +9,6 @@
 #include "guikit/mobile/SystemBridge.hpp"
 #include "guikit/mobile/TouchGesture.hpp"
 #include "guikit/mobile/MobileRuntime.hpp"
+#include "guikit/mobile/IMobileWindowBackend.hpp"
+#include "guikit/mobile/SdlMobileWindowBackend.hpp"
+#include "guikit/mobile/MobileWindow.hpp"

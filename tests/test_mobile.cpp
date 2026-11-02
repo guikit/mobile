@@ -1,7 +1,10 @@
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <vector>
 #include "guikit/Mobile.hpp"
+#include "guikit/backend/ThorCanvas.hpp"
 
 using namespace guikit;
 using namespace guikit::mobile;
@@ -163,24 +166,139 @@ void TestTouchAndSystem() {
     sys.TriggerHaptic(HapticStyle::Light);
     assert(sys.GetHapticPulseCount() == 1);
 
-    SDL_Event downEv{};
-    downEv.type = SDL_EVENT_FINGER_DOWN;
-    downEv.tfinger.fingerID = 1;
-    downEv.tfinger.x = 0.5f;
-    downEv.tfinger.y = 0.5f;
-    assert(touch.ProcessSdlEvent(downEv, ui, {800.0f, 600.0f}));
+    // Backend-agnostic multi-touch events (window pixel coordinates)
+    touch.OnTouchDown(1, {400.0f, 300.0f}, ui);
     assert(touch.GetState().activeFingerCount == 1);
 
-    SDL_Event upEv{};
-    upEv.type = SDL_EVENT_FINGER_UP;
-    upEv.tfinger.fingerID = 1;
-    upEv.tfinger.x = 0.5f;
-    upEv.tfinger.y = 0.4f;
-    assert(touch.ProcessSdlEvent(upEv, ui, {800.0f, 600.0f}));
+    touch.OnTouchMove(1, {400.0f, 270.0f}, {0.0f, -30.0f}, ui);
+    assert(touch.GetState().activeFingerCount == 1);
+
+    touch.OnTouchUp(1, {400.0f, 240.0f}, ui);
     assert(touch.GetState().activeFingerCount == 0);
 
     sys.Shutdown();
     std::cout << "[PASS] TestTouchAndSystem\n";
+}
+
+class HeadlessMobileWindowBackend final : public IMobileWindowBackend {
+public:
+    bool Initialize(
+        const MobileWindowConfig& config,
+        Context& /*ui*/,
+        MobileRuntime& runtime,
+        const MobileWindowHostCallbacks& callbacks
+    ) override {
+        m_width = config.width;
+        m_height = config.height;
+        m_vsync = config.vsync;
+        m_callbacks = callbacks;
+        m_pixels.assign(static_cast<size_t>(m_width * m_height), 0);
+        m_canvas.SetTarget(m_pixels.data(), m_width, m_height, m_width);
+        return runtime.Initialize(nullptr, nullptr);
+    }
+
+    void Shutdown() noexcept override {
+        m_pixels.clear();
+    }
+
+    bool PumpEvents(
+        Context& /*ui*/,
+        MobileRuntime& /*runtime*/,
+        bool /*reactiveMode*/,
+        int /*sleepTimeoutMs*/
+    ) override {
+        ++m_pumpedFrames;
+        if (m_pumpedFrames == 2 && m_callbacks.onResize) {
+            // Simulate device rotation from portrait (400x800) to landscape (800x400)
+            m_width = 800;
+            m_height = 400;
+            m_pixels.assign(static_cast<size_t>(m_width * m_height), 0);
+            m_canvas.SetTarget(m_pixels.data(), m_width, m_height, m_width);
+            m_callbacks.onResize(m_width, m_height);
+        }
+        return m_pumpedFrames <= 3;
+    }
+
+    void PrepareFrameTarget(Context& /*ui*/) override {}
+
+    void PresentFrame(
+        const Context& /*ui*/,
+        FrameMetrics& metrics,
+        bool /*forcePresent*/
+    ) override {
+        ++m_presentedFrames;
+        metrics.MarkGpuDone();
+    }
+
+    void PaceFrame(double /*elapsedMs*/, bool /*presented*/) noexcept override {}
+
+    ICanvas& GetCanvas() noexcept override { return m_canvas; }
+    const ICanvas& GetCanvas() const noexcept override { return m_canvas; }
+
+    int GetWidth() const noexcept override { return m_width; }
+    int GetHeight() const noexcept override { return m_height; }
+    float GetDisplayScale() const noexcept override { return 2.0f; }
+    float GetDisplayPixelsPerMm() const noexcept override { return 6.0f; }
+    bool IsMinimized() const noexcept override { return false; }
+
+    bool IsVsyncEnabled() const noexcept override { return m_vsync; }
+    void SetVsyncEnabled(bool enabled) noexcept override { m_vsync = enabled; }
+    void OpenUrl(std::string_view /*url*/) const noexcept override {}
+
+    int GetPresentedFrames() const noexcept { return m_presentedFrames; }
+
+private:
+    ThorCanvas m_canvas{};
+    std::vector<uint32_t> m_pixels{};
+    MobileWindowHostCallbacks m_callbacks{};
+    int m_width{400};
+    int m_height{800};
+    int m_pumpedFrames{0};
+    int m_presentedFrames{0};
+    bool m_vsync{true};
+};
+
+void TestMobileWindowCustomBackend() {
+    auto customBackend = std::make_unique<HeadlessMobileWindowBackend>();
+    auto* rawBackend = customBackend.get();
+
+    MobileWindow window(
+        MobileWindowConfig{
+            .title = "Headless MobileWindow Test",
+            .width = 400,
+            .height = 800,
+            .reactiveMode = false
+        },
+        std::move(customBackend)
+    );
+
+    size_t activeTab = 0;
+    int renderedFrames = 0;
+    bool sawPortrait = false;
+    bool sawLandscape = false;
+
+    const int rc = window.Run([&](Context& ui, MobileRuntime& mobile) {
+        ++renderedFrames;
+        if (window.IsPortrait()) sawPortrait = true;
+        if (window.IsLandscape()) sawLandscape = true;
+
+        // 400x800 px @ 2.0x DPI = 200x400 dp -> Smartphone (!IsTablet())
+        assert(!window.IsTablet());
+        assert(std::abs(window.GetDpiScale() - 2.0f) < 1e-3f);
+
+        window.RenderStatusBar(ui);
+        ui.Text(ui.Format("Roll: {:.1f}", mobile.Sensors().GetSnapshot().attitude.rollDeg));
+
+        static constexpr std::array<std::string_view, 3> kTabs = {"Horizon", "Sensors", "Camera"};
+        window.RenderBottomNavigationBar(ui, activeTab, kTabs);
+    });
+
+    assert(rc == 0);
+    assert(renderedFrames == 3);
+    assert(rawBackend->GetPresentedFrames() == 3);
+    assert(sawPortrait);
+    assert(sawLandscape);
+    std::cout << "[PASS] TestMobileWindowCustomBackend\n";
 }
 
 } // namespace
@@ -191,6 +309,7 @@ int main() {
     TestLocation();
     TestAudioCapture();
     TestTouchAndSystem();
+    TestMobileWindowCustomBackend();
     std::cout << "All guikit::mobile tests passed!\n";
     return 0;
 }

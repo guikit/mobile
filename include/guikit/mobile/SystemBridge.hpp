@@ -5,7 +5,6 @@
 #include <functional>
 #include <string>
 #include <string_view>
-#include <SDL3/SDL.h>
 #include "guikit/mobile/Types.hpp"
 
 namespace guikit::mobile {
@@ -26,10 +25,10 @@ public:
     SystemBridge(const SystemBridge&) = delete;
     SystemBridge& operator=(const SystemBridge&) = delete;
 
-    bool Initialize(SDL_Window* window = nullptr);
+    bool Initialize(void* nativeWindowHandle = nullptr);
     void Shutdown();
 
-    void SetWindow(SDL_Window* window) noexcept { m_window = window; }
+    void SetWindow(void* nativeWindowHandle) noexcept { m_window = nativeWindowHandle; }
     void UpdateFrame(double dtSeconds);
 
     // --- Device & OS Info ---
@@ -66,8 +65,8 @@ private:
     void UpdateSafeArea();
     void UpdateBatteryInfo();
 
-    SDL_Window* m_window{nullptr};
-    SDL_Haptic* m_haptic{nullptr};
+    void* m_window{nullptr};
+    void* m_haptic{nullptr};
     DeviceInfo m_deviceInfo{};
     SafeAreaInsets m_safeArea{};
     BatteryStatus m_battery{};

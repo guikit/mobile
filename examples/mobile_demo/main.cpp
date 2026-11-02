@@ -1,13 +1,12 @@
-#include <SDL3/SDL.h>
+#ifdef __ANDROID__
 #include <SDL3/SDL_main.h>
+#endif
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <string>
 #include <vector>
 #include "guikit/Mobile.hpp"
-#include "guikit/backend/ThorCanvas.hpp"
 #include "guikit/geo/GeoJsonIO.hpp"
 #include "guikit/geo/GisRenderEngine.hpp"
 
@@ -26,7 +25,6 @@ enum class MobileTab : size_t {
 
 struct MobileAppState {
     size_t activeTab{0};
-    bool showSimulatorDrawer{true};
     bool compactAdiMode{true};
     bool fullBleedHorizon{true};
     int imuSignalAxis{3}; // 0=AccX, 1=AccY, 2=AccZ, 3=|G|, 4=Gyro, 5=Mag, 6=Baro
@@ -50,51 +48,6 @@ struct MobileAppState {
         }
     }
 };
-
-void RenderStatusBar(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
-    const auto& dev = runtime.System().GetDeviceInfo();
-    const auto& bat = runtime.System().GetBatteryStatus();
-    const auto& fix = runtime.Location().GetLatestFix();
-    const auto& snap = runtime.Sensors().GetSnapshot();
-
-    if (auto bar = ui.Box({
-        .widthMode = SizeMode::Stretch,
-        .heightMode = SizeMode::Fit,
-        .padding = Padding::Symmetric(10.0f, 5.0f),
-        .background = {.normal = Color(13, 18, 28, 255)},
-        .border = {.width = 1.0f, .radius = 0.0f}
-    })) {
-        if (auto row = ui.Row({.gap = 8.0f, .align = Alignment::Center, .widthMode = SizeMode::Stretch})) {
-            ui.Text(ui.Format("{}", dev.model), {
-                .role = TextRole::LabelSmall,
-                .variant = UiVariant::Info
-            });
-
-            ui.Spacer();
-
-            ui.Text(ui.Format("{} sat | {:.0f} lx",
-                              fix.satellitesUsed,
-                              snap.ambientLightLux), {
-                .role = TextRole::CodeSmall,
-                .variant = UiVariant::Muted
-            });
-
-            ui.Text(ui.Format("{}{:.0f}%", bat.isCharging ? "CHG " : "BAT ", bat.levelPct), {
-                .role = TextRole::CodeSmall,
-                .variant = bat.levelPct > 25.0f ? UiVariant::Success : UiVariant::Warning
-            });
-
-            if (ui.Size(UiSize::Xs).Button({
-                .text = app.showSimulatorDrawer ? "Hide Sim" : "Sim",
-                .icon = Icon::Settings(),
-                .color = app.showSimulatorDrawer ? StateColor::Primary() : StateColor{}
-            }).clicked) {
-                app.showSimulatorDrawer = !app.showSimulatorDrawer;
-                runtime.System().TriggerHaptic(HapticStyle::Selection);
-            }
-        }
-    }
-}
 
 void RenderHorizonTab(Context& ui, MobileRuntime& runtime, MobileAppState& /*app*/) {
     const auto& snap = runtime.Sensors().GetSnapshot();
@@ -488,69 +441,55 @@ void RenderGnssAndSystemTab(Context& ui, MobileRuntime& runtime, MobileAppState&
     }
 }
 
-void RenderSimulatorDrawer(Context& ui, MobileRuntime& runtime) {
-    auto& sim = runtime.Sensors().GetSimConfig();
+class MobileDemoWindow final : public MobileWindow {
+public:
+    MobileDemoWindow()
+        : MobileWindow({
+            .title = "GuiKit Mobile — Android & iOS Sensor / Camera / GNSS Workstation",
+            .width = 1180,
+            .height = 820,
+            .resizable = true,
+            .highDpi = true,
+            .vsync = true,
+            .reactiveMode = true,
+            .applySafeAreaPadding = true
+        }) {}
 
-    if (auto panel = ui.Card({
-        .minWidth = 280.0f,
-        .gap = 10.0f,
-        .padding = Padding::All(14.0f),
-        .widthMode = SizeMode::Fit,
-        .heightMode = SizeMode::Stretch
-    })) {
-        ui.Size(UiSize::Sm).Heading({
-            .label = "Mobile Hardware Sim",
-            .description = "Real-time IMU, Baro & Light injection",
-            .icon = Icon::Settings(),
-            .divider = true
-        });
+protected:
+    void OnRender(Context& ui, MobileRuntime& mobile) override {
+        RenderStatusBar(ui);
 
-        if (auto el = ui.Size(UiSize::Sm).Element({.label = "Auto IMU Motion"})) {
-            ui.Size(UiSize::Sm).Switch(sim.animateMotion);
+        if (auto body = ui.Row({
+            .gap = 0.0f,
+            .widthMode = SizeMode::Stretch,
+            .heightMode = SizeMode::Stretch
+        })) {
+            if (auto stage = ui.Column({
+                .widthMode = SizeMode::Stretch,
+                .heightMode = SizeMode::Stretch
+            })) {
+                switch (static_cast<MobileTab>(m_app.activeTab)) {
+                    case MobileTab::Horizon:
+                        RenderHorizonTab(ui, mobile, m_app);
+                        break;
+                    case MobileTab::Sensors:
+                        RenderSensorsTab(ui, mobile, m_app);
+                        break;
+                    case MobileTab::CameraVision:
+                        RenderCameraVisionTab(ui, mobile, m_app);
+                        break;
+                    case MobileTab::AudioSpectrum:
+                        RenderAudioSpectrumTab(ui, mobile, m_app);
+                        break;
+                    case MobileTab::GnssAndSystem:
+                        RenderGnssAndSystemTab(ui, mobile, m_app);
+                        break;
+                }
+            }
+
+            RenderSimulatorDrawer(ui);
         }
 
-        if (auto el = ui.Size(UiSize::Sm).Element({.label = "Pitch Bias (deg)"})) {
-            ui.Size(UiSize::Sm).Slider(sim.manualPitchDeg, -45.0f, 45.0f, {.valueFormat = "%+.1f deg"});
-        }
-
-        if (auto el = ui.Size(UiSize::Sm).Element({.label = "Roll Bias (deg)"})) {
-            ui.Size(UiSize::Sm).Slider(sim.manualRollDeg, -75.0f, 75.0f, {.valueFormat = "%+.1f deg"});
-        }
-
-        if (auto el = ui.Size(UiSize::Sm).Element({.label = "Compass Heading"})) {
-            ui.Size(UiSize::Sm).Slider(sim.manualHeadingDeg, 0.0f, 359.0f, {.valueFormat = "%03.0f deg"});
-        }
-
-        if (auto el = ui.Size(UiSize::Sm).Element({.label = "Vibration Freq"})) {
-            ui.Size(UiSize::Sm).Slider(sim.vibrationFreqHz, 2.0f, 45.0f, {.valueFormat = "%.1f Hz"});
-        }
-
-        if (auto el = ui.Size(UiSize::Sm).Element({.label = "Vibration Amp"})) {
-            ui.Size(UiSize::Sm).Slider(sim.vibrationAmpG, 0.0f, 1.0f, {.valueFormat = "%.2f G"});
-        }
-
-        if (auto el = ui.Size(UiSize::Sm).Element({.label = "Barometer (hPa)"})) {
-            ui.Size(UiSize::Sm).Slider(sim.simPressureHpa, 950.0f, 1045.0f, {.valueFormat = "%.1f hPa"});
-        }
-
-        if (auto el = ui.Size(UiSize::Sm).Element({.label = "Ambient Light"})) {
-            ui.Size(UiSize::Sm).Slider(sim.simLightLux, 5.0f, 2000.0f, {.valueFormat = "%.0f lx"});
-        }
-
-        if (auto el = ui.Size(UiSize::Sm).Element({.label = "Proximity Near"})) {
-            ui.Size(UiSize::Sm).Switch(sim.simProximityNear);
-        }
-    }
-}
-
-void RenderBottomNavigationBar(Context& ui, MobileRuntime& runtime, MobileAppState& app) {
-    if (auto bar = ui.Box({
-        .widthMode = SizeMode::Stretch,
-        .heightMode = SizeMode::Fit,
-        .padding = Padding::Symmetric(8.0f, 6.0f),
-        .background = {.normal = Color(15, 23, 42, 255)},
-        .border = {.width = 1.0f, .radius = 0.0f}
-    })) {
         static constexpr std::array<std::string_view, 5> kTabs = {
             "Horizon",
             "Sensors",
@@ -558,184 +497,16 @@ void RenderBottomNavigationBar(Context& ui, MobileRuntime& runtime, MobileAppSta
             "Audio",
             "GNSS"
         };
-        if (ui.Size(UiSize::Sm).Segmented(app.activeTab, kTabs, {
-            .stretch = StretchMode::Fill
-        }).changed) {
-            runtime.System().TriggerHaptic(HapticStyle::Selection);
-        }
+        RenderBottomNavigationBar(ui, m_app.activeTab, kTabs);
     }
-}
+
+private:
+    MobileAppState m_app{};
+};
 
 } // namespace
 
 int main(int /*argc*/, char* /*argv*/[]) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) return 1;
-
-    int winW = 1180;
-    int winH = 820;
-    SDL_Window* window = nullptr;
-    SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer(
-            "GuiKit Mobile — Android & iOS Sensor / Camera / GNSS Workstation",
-            winW,
-            winH,
-            SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY,
-            &window,
-            &renderer)) {
-        SDL_Quit();
-        return 1;
-    }
-    SDL_SetRenderVSync(renderer, 1);
-    SDL_GetWindowSizeInPixels(window, &winW, &winH);
-    winW = std::max(1, winW);
-    winH = std::max(1, winH);
-
-    Context ui;
-    ThorCanvas canvas;
-    std::vector<uint32_t> pixels(static_cast<size_t>(winW * winH), 0);
-    canvas.SetTarget(pixels.data(), winW, winH, winW);
-
-    SDL_Texture* tex = SDL_CreateTexture(
-        renderer,
-        SDL_PIXELFORMAT_ABGR8888,
-        SDL_TEXTUREACCESS_STREAMING,
-        winW,
-        winH
-    );
-    SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
-
-    MobileRuntime mobile;
-    mobile.Initialize(window, renderer);
-
-    MobileAppState app{};
-#ifdef __ANDROID__
-    app.showSimulatorDrawer = false;
-#endif
-
-    bool running = true;
-    auto prevTime = std::chrono::steady_clock::now();
-
-    while (running) {
-        const auto now = std::chrono::steady_clock::now();
-        const double dt = std::clamp(std::chrono::duration<double>(now - prevTime).count(), 0.001, 0.1);
-        prevTime = now;
-
-        SDL_Event ev;
-        while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_EVENT_QUIT) {
-                running = false;
-                break;
-            }
-            if (ev.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
-                winW = std::max(1, ev.window.data1);
-                winH = std::max(1, ev.window.data2);
-                pixels.assign(static_cast<size_t>(winW * winH), 0);
-                canvas.SetTarget(pixels.data(), winW, winH, winW);
-                SDL_DestroyTexture(tex);
-                tex = SDL_CreateTexture(
-                    renderer,
-                    SDL_PIXELFORMAT_ABGR8888,
-                    SDL_TEXTUREACCESS_STREAMING,
-                    winW,
-                    winH
-                );
-                SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
-                ui.InvalidateAll();
-                continue;
-            }
-
-            if (mobile.ProcessEvent(ev, ui, {static_cast<float>(winW), static_cast<float>(winH)})) {
-                continue;
-            }
-
-            if (ev.type == SDL_EVENT_MOUSE_MOTION) {
-                ui.OnMouseMove({ev.motion.x, ev.motion.y});
-            } else if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-                ui.OnMouseDown(ev.button.button);
-            } else if (ev.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-                ui.OnMouseUp(ev.button.button);
-            } else if (ev.type == SDL_EVENT_MOUSE_WHEEL) {
-                ui.OnMouseWheel(ev.wheel.x, ev.wheel.y);
-            } else if (ev.type == SDL_EVENT_TEXT_INPUT) {
-                ui.OnTextInput(ev.text.text);
-            }
-        }
-
-        mobile.UpdateFrame(dt, ui);
-
-        const float dpi = SDL_GetWindowDisplayScale(window);
-        const float effDpi = (dpi > 0.0f) ? dpi : 1.0f;
-        ui.BeginFrame({static_cast<float>(winW), static_cast<float>(winH)}, effDpi);
-
-        const SafeAreaInsets safe = mobile.System().GetSafeAreaInsets();
-        const Padding rootPadding = mobile.System().GetDeviceInfo().isSimulator
-            ? Padding{}
-            : Padding(
-                  safe.left / effDpi,
-                  safe.top / effDpi,
-                  safe.right / effDpi,
-                  safe.bottom / effDpi
-              );
-
-        if (auto root = ui.Column({
-            .padding = rootPadding,
-            .widthMode = SizeMode::Stretch,
-            .heightMode = SizeMode::Stretch
-        })) {
-            RenderStatusBar(ui, mobile, app);
-
-            if (auto body = ui.Row({
-                .gap = 0.0f,
-                .widthMode = SizeMode::Stretch,
-                .heightMode = SizeMode::Stretch
-            })) {
-                if (auto stage = ui.Column({
-                    .widthMode = SizeMode::Stretch,
-                    .heightMode = SizeMode::Stretch
-                })) {
-                    switch (static_cast<MobileTab>(app.activeTab)) {
-                        case MobileTab::Horizon:
-                            RenderHorizonTab(ui, mobile, app);
-                            break;
-                        case MobileTab::Sensors:
-                            RenderSensorsTab(ui, mobile, app);
-                            break;
-                        case MobileTab::CameraVision:
-                            RenderCameraVisionTab(ui, mobile, app);
-                            break;
-                        case MobileTab::AudioSpectrum:
-                            RenderAudioSpectrumTab(ui, mobile, app);
-                            break;
-                        case MobileTab::GnssAndSystem:
-                            RenderGnssAndSystemTab(ui, mobile, app);
-                            break;
-                    }
-                }
-
-                if (app.showSimulatorDrawer) {
-                    RenderSimulatorDrawer(ui, mobile);
-                }
-            }
-
-            RenderBottomNavigationBar(ui, mobile, app);
-        }
-
-        ui.EndFrame(canvas);
-
-        if (ui.HasDirtyDamage()) {
-            SDL_UpdateTexture(tex, nullptr, pixels.data(), winW * static_cast<int>(sizeof(uint32_t)));
-            SDL_RenderClear(renderer);
-            SDL_RenderTexture(renderer, tex, nullptr, nullptr);
-            SDL_RenderPresent(renderer);
-        } else {
-            SDL_Delay(4);
-        }
-    }
-
-    mobile.Shutdown();
-    SDL_DestroyTexture(tex);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
-    return 0;
+    MobileDemoWindow window;
+    return window.Run();
 }

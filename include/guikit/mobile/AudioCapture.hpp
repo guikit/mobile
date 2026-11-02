@@ -5,7 +5,6 @@
 #include <mutex>
 #include <span>
 #include <vector>
-#include <SDL3/SDL.h>
 #include "guikit/mobile/Types.hpp"
 
 namespace guikit::mobile {
@@ -66,7 +65,7 @@ public:
 private:
     void ComputeMetricsAndSpectrum();
 
-    SDL_AudioStream* m_audioStream{nullptr};
+    void* m_audioStream{nullptr};
     uint32_t m_sampleRate{kDefaultSampleRate};
     std::vector<float> m_waveform;
     std::vector<float> m_spectrumDb;
