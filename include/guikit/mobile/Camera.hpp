@@ -7,6 +7,7 @@
 #include <vector>
 #include "guikit/mobile/Types.hpp"
 #include "guikit/widgets/ImageView.hpp"
+#include "keel/mobile/camera.h"
 
 namespace guikit::mobile {
 
@@ -54,9 +55,7 @@ struct CameraFrameStats {
     std::array<uint32_t, 256> histB{};     ///< 256-bin Blue histogram
 };
 
-/// Mobile Camera Service managing video preview, RGB/Luminance analysis, Torch, Focus, and Photo Capture.
-/// Uses SDL3 Camera backend (Android Camera2 NDK / Windows MediaFoundation / V4L2 / CoreMedia)
-/// with an automatic procedural test-chart camera fallback when no physical camera is available.
+/// Mobile Camera Service backed by `keel::CameraService` (`keelcpp/mobile`) + SDL3 texture bridge.
 class CameraService {
 public:
     CameraService();
@@ -72,11 +71,11 @@ public:
     /// Starts or stops the camera stream.
     bool OpenCamera(size_t deviceIndex = 0, int width = 640, int height = 480);
     void CloseCamera();
-    [[nodiscard]] bool IsStreaming() const noexcept { return m_streaming; }
+    [[nodiscard]] bool IsStreaming() const noexcept { return m_hal.is_streaming(); }
 
     /// Pauses/resumes hardware camera stream across mobile app background/foreground transitions.
-    void SetPaused(bool paused);
-    [[nodiscard]] bool IsPaused() const noexcept { return m_paused; }
+    void SetPaused(bool paused) { m_hal.set_paused(paused); }
+    [[nodiscard]] bool IsPaused() const noexcept { return m_hal.is_paused(); }
 
     /// Switches between Front and Back camera (or cycles available cameras).
     bool SwitchCameraFacing();
@@ -86,7 +85,7 @@ public:
 
     /// Returns list of available camera devices.
     [[nodiscard]] std::span<const CameraDeviceInfo> GetDevices() const noexcept { return m_devices; }
-    [[nodiscard]] size_t GetActiveDeviceIndex() const noexcept { return m_activeDeviceIndex; }
+    [[nodiscard]] size_t GetActiveDeviceIndex() const noexcept { return m_hal.active_device_index(); }
     [[nodiscard]] const CameraDeviceInfo* GetActiveDevice() const noexcept;
 
     /// Returns non-owning `ImageViewData` descriptor (3-channel RGB888) ready to pass to `ui.ImageView(...)`.
@@ -101,64 +100,51 @@ public:
     [[nodiscard]] const CameraFrameStats& GetFrameStats() const noexcept { return m_stats; }
 
     // --- Mobile Camera Hardware Controls ---
-    void SetFlashMode(FlashMode mode);
-    [[nodiscard]] FlashMode GetFlashMode() const noexcept { return m_flashMode; }
+    void SetFlashMode(FlashMode mode) { m_hal.set_flash_mode(static_cast<keel::FlashMode>(mode)); }
+    [[nodiscard]] FlashMode GetFlashMode() const noexcept { return static_cast<FlashMode>(m_hal.flash_mode()); }
 
-    void SetTorchEnabled(bool enabled);
-    [[nodiscard]] bool IsTorchEnabled() const noexcept { return m_torchEnabled; }
+    void SetTorchEnabled(bool enabled) { m_hal.set_torch_enabled(enabled); }
+    [[nodiscard]] bool IsTorchEnabled() const noexcept { return m_hal.is_torch_enabled(); }
 
     /// Normalized tap-to-focus target in viewport coordinates [0..1, 0..1].
-    void TriggerTapToFocus(Vec2 normalizedPoint);
-    [[nodiscard]] Vec2 GetFocusPoint() const noexcept { return m_focusPoint; }
+    void TriggerTapToFocus(Vec2 normalizedPoint) {
+        m_hal.trigger_tap_to_focus(keel::Vec2f{normalizedPoint.x, normalizedPoint.y});
+    }
+    [[nodiscard]] Vec2 GetFocusPoint() const noexcept {
+        const auto fp = m_hal.focus_point();
+        return {fp.x, fp.y};
+    }
 
-    /// Exposure compensation in EV stops (-2.0 .. +2.0).
-    void SetExposureCompensationEv(float ev) noexcept;
-    [[nodiscard]] float GetExposureCompensationEv() const noexcept { return m_exposureEv; }
+    /// Exposure compensation in EV stops (-3.0 .. +3.0).
+    void SetExposureCompensationEv(float ev) noexcept { m_hal.set_exposure_compensation_ev(ev); }
+    [[nodiscard]] float GetExposureCompensationEv() const noexcept { return m_hal.exposure_compensation_ev(); }
 
     /// Digital / Optical zoom factor (1.0x .. 8.0x).
-    void SetZoomFactor(float zoom) noexcept;
-    [[nodiscard]] float GetZoomFactor() const noexcept { return m_zoomFactor; }
+    void SetZoomFactor(float zoom) noexcept { m_hal.set_zoom_factor(zoom); }
+    [[nodiscard]] float GetZoomFactor() const noexcept { return m_hal.zoom_factor(); }
 
     /// Captures still snapshot from the current video frame and increments capture counter.
-    bool CaptureSnapshot();
-    [[nodiscard]] uint32_t GetCapturedPhotoCount() const noexcept { return m_capturedPhotos; }
-    [[nodiscard]] std::span<const uint8_t> GetLastCapturedRgb() const noexcept { return m_lastCapturedRgb; }
+    bool CaptureSnapshot() { return m_hal.capture_snapshot(); }
+    [[nodiscard]] uint32_t GetCapturedPhotoCount() const noexcept { return m_hal.captured_photo_count(); }
+    [[nodiscard]] std::span<const uint8_t> GetLastCapturedRgb() const noexcept {
+        const auto s = m_hal.last_captured_rgb();
+        return {s.data(), s.size()};
+    }
+
+    [[nodiscard]] keel::CameraService& Hal() noexcept { return m_hal; }
+    [[nodiscard]] const keel::CameraService& Hal() const noexcept { return m_hal; }
 
 private:
-    void GenerateProceduralFrame(double dtSeconds, float pitchDeg = 0.0f, float rollDeg = 0.0f);
-    void ComputeFrameHistograms();
-    bool OpenAndroidCamera(const CameraDeviceInfo& dev, int width, int height);
-    void CloseAndroidCamera();
+    void SyncDevicesFromHal();
+    void SyncStatsFromHal();
 
-    struct AndroidCameraState;
-    AndroidCameraState* m_androidCam{nullptr};
-
-    std::vector<CameraDeviceInfo> m_devices;
-    size_t m_activeDeviceIndex{0};
+    keel::CameraService m_hal{};
+    std::vector<CameraDeviceInfo> m_devices{};
+    CameraFrameStats m_stats{};
     void* m_sdlCamera{nullptr};
     void* m_previewTexture{nullptr};
-
-    uint32_t m_frameWidth{480};
-    uint32_t m_frameHeight{640};
-    std::vector<uint8_t> m_rgbPixels;         ///< 3-channel RGB888 for `guikit::ImageView`
-    std::vector<uint32_t> m_rgbaPixels;       ///< 4-channel RGBA8888 for `SDL_Texture`
-    std::vector<uint8_t> m_lastCapturedRgb;
-    CameraFrameStats m_stats{};
-
-    bool m_initialized{false};
-    bool m_streaming{false};
-    bool m_paused{false};
-    bool m_usingSynthetic{false};
-    bool m_torchEnabled{false};
-    FlashMode m_flashMode{FlashMode::Off};
-    Vec2 m_focusPoint{0.5f, 0.5f};
-    float m_exposureEv{0.0f};
-    float m_zoomFactor{1.0f};
-    uint32_t m_capturedPhotos{0};
-    double m_simTimeSec{0.0};
-    double m_retryTimerSec{0.0};
-    double m_fpsAccumSec{0.0};
-    uint32_t m_fpsFrameCount{0};
+    uint32_t m_texWidth{0};
+    uint32_t m_texHeight{0};
 };
 
 } // namespace guikit::mobile

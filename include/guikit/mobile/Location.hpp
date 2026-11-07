@@ -5,6 +5,7 @@
 #include <vector>
 #include "guikit/geo/MapGrid.hpp"
 #include "guikit/mobile/Types.hpp"
+#include "keel/mobile/location.h"
 
 namespace guikit::mobile {
 
@@ -26,11 +27,11 @@ struct LocationFix {
     [[nodiscard]] float SpeedKmh() const noexcept { return speedMetersPerSec * 3.6f; }
 };
 
-/// Mobile GNSS / Location service (Android LocationManager JNI + Desktop Route Simulator).
+/// Mobile GNSS / Location service backed by `keel::LocationService` (`keelcpp/mobile`).
 /// Directly produces `guikit::GeoCoord` trajectories for rendering on `guikit::MapView`.
 class LocationService {
 public:
-    static constexpr size_t kMaxTrackHistory = 512;
+    static constexpr size_t kMaxTrackHistory = keel::LocationService::kMaxTrackHistory;
 
     LocationService();
     ~LocationService();
@@ -41,40 +42,48 @@ public:
     bool Initialize();
     void Shutdown();
 
-    void SetEnabled(bool enabled);
-    [[nodiscard]] bool IsEnabled() const noexcept { return m_enabled; }
+    void SetEnabled(bool enabled) { m_hal.set_enabled(enabled); }
+    [[nodiscard]] bool IsEnabled() const noexcept { return m_hal.is_enabled(); }
 
     void UpdateFrame(double dtSeconds);
 
     [[nodiscard]] const LocationFix& GetLatestFix() const noexcept { return m_latestFix; }
     [[nodiscard]] std::span<const GeoCoord> GetBreadcrumbTrack() const noexcept { return m_trackHistory; }
 
-    void ClearBreadcrumbTrack() noexcept { m_trackHistory.clear(); }
+    void ClearBreadcrumbTrack() noexcept {
+        m_hal.clear_breadcrumb_track();
+        m_trackHistory.clear();
+    }
     void SetSimulatedRouteCenter(GeoCoord center) noexcept;
 
     /// Computes great-circle Haversine distance in meters between two WGS-84 coordinates.
-    [[nodiscard]] static double DistanceMeters(GeoCoord a, GeoCoord b) noexcept;
+    [[nodiscard]] static double DistanceMeters(GeoCoord a, GeoCoord b) noexcept {
+        return keel::LocationService::distance_meters(
+            keel::GeoCoord{a.lat, a.lon},
+            keel::GeoCoord{b.lat, b.lon}
+        );
+    }
 
     /// Computes initial forward azimuth (bearing) in degrees [0..360) from coordinate `a` to `b`.
-    [[nodiscard]] static float BearingDegrees(GeoCoord a, GeoCoord b) noexcept;
+    [[nodiscard]] static float BearingDegrees(GeoCoord a, GeoCoord b) noexcept {
+        return keel::LocationService::bearing_degrees(
+            keel::GeoCoord{a.lat, a.lon},
+            keel::GeoCoord{b.lat, b.lon}
+        );
+    }
 
     /// Total distance traveled along the recorded breadcrumb track in meters.
-    [[nodiscard]] double GetTotalTrackDistanceMeters() const noexcept { return m_totalDistanceMeters; }
+    [[nodiscard]] double GetTotalTrackDistanceMeters() const noexcept { return m_hal.total_track_distance_meters(); }
+
+    [[nodiscard]] keel::LocationService& Hal() noexcept { return m_hal; }
+    [[nodiscard]] const keel::LocationService& Hal() const noexcept { return m_hal; }
 
 private:
-    bool PollAndroidLocation();
-    void StepSimulatedRoute(double dtSeconds);
-    void AppendTrackPoint(GeoCoord pt);
+    void SyncFromHal();
 
+    keel::LocationService m_hal{};
     LocationFix m_latestFix{};
-    GeoCoord m_simCenter{44.6020, 33.4950}; ///< Matches embedded demo_bay.geojson chart by default
-    std::vector<GeoCoord> m_trackHistory;
-    double m_totalDistanceMeters{0.0};
-    double m_simTimeSec{0.0};
-    double m_trackSampleTimerSec{0.0};
-    bool m_initialized{false};
-    bool m_enabled{true};
-    bool m_hasAndroidLocation{false};
+    std::vector<GeoCoord> m_trackHistory{};
 };
 
 } // namespace guikit::mobile

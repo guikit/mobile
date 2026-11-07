@@ -2,11 +2,10 @@
 
 #include <array>
 #include <cstdint>
-#include <mutex>
 #include <span>
 #include <string>
-#include <vector>
 #include "guikit/mobile/Types.hpp"
+#include "keel/mobile/sensors.h"
 
 namespace guikit::mobile {
 
@@ -94,10 +93,10 @@ struct SensorSimConfig {
     bool simProximityNear{false};    ///< Simulated proximity trigger
 };
 
-/// Cross-platform Sensor Manager (Android NDK ASensorManager + Desktop Physics Simulator).
+/// Cross-platform Sensor Manager backed by `keel::SensorManager` (`keelcpp/mobile`).
 class SensorManager {
 public:
-    static constexpr size_t kDefaultHistorySamples = 1024;
+    static constexpr size_t kDefaultHistorySamples = keel::SensorManager::kDefaultHistorySamples;
 
     SensorManager();
     ~SensorManager();
@@ -105,13 +104,13 @@ public:
     SensorManager(const SensorManager&) = delete;
     SensorManager& operator=(const SensorManager&) = delete;
 
-    /// Initializes hardware sensor manager (NDK ASensorManager on Android, Simulator on Desktop).
+    /// Initializes hardware sensor manager (`keel::SensorManager`).
     bool Initialize();
     void Shutdown();
 
     /// Pauses/resumes hardware sensor polling during mobile lifecycle transitions (`OnPause`/`OnResume`).
     void SetPaused(bool paused);
-    [[nodiscard]] bool IsPaused() const noexcept { return m_paused; }
+    [[nodiscard]] bool IsPaused() const noexcept { return m_hal.is_paused(); }
 
     /// Enables or disables a specific sensor modality.
     bool SetSensorEnabled(SensorType type, bool enabled);
@@ -120,8 +119,8 @@ public:
 
     /// Configures sampling rate across active sensors.
     void SetSamplingRate(SensorRate rate);
-    [[nodiscard]] SensorRate GetSamplingRate() const noexcept { return m_rate; }
-    [[nodiscard]] float GetEstimatedSampleRateHz() const noexcept;
+    [[nodiscard]] SensorRate GetSamplingRate() const noexcept { return static_cast<SensorRate>(m_hal.sampling_rate()); }
+    [[nodiscard]] float GetEstimatedSampleRateHz() const noexcept { return m_hal.estimated_sample_rate_hz(); }
 
     /// Latches latest hardware/simulator readings into the frame snapshot and updates time-series buffers.
     void UpdateFrame(double dtSeconds);
@@ -133,36 +132,67 @@ public:
     [[nodiscard]] std::span<const SensorInfo> GetSensorInfos() const noexcept { return m_infos; }
 
     /// Reference QNH pressure in hPa used for barometric altitude calculation (default 1013.25 hPa).
-    void SetSeaLevelPressureHpa(float qnhHpa) noexcept { m_seaLevelPressureHpa = qnhHpa; }
-    [[nodiscard]] float GetSeaLevelPressureHpa() const noexcept { return m_seaLevelPressureHpa; }
+    void SetSeaLevelPressureHpa(float qnhHpa) noexcept { m_hal.set_sea_level_pressure_hpa(qnhHpa); }
+    [[nodiscard]] float GetSeaLevelPressureHpa() const noexcept { return m_hal.sea_level_pressure_hpa(); }
 
     /// Sets the reference frame for Pitch & Roll (default: `AttitudeReference::Handheld`).
     void SetAttitudeReference(AttitudeReference ref) noexcept;
-    [[nodiscard]] AttitudeReference GetAttitudeReference() const noexcept { return m_attitudeRef; }
+    [[nodiscard]] AttitudeReference GetAttitudeReference() const noexcept {
+        return static_cast<AttitudeReference>(m_hal.attitude_reference());
+    }
 
     /// Sets the active display orientation so physical MEMS sensor axes are remapped to screen space.
-    void SetScreenOrientation(ScreenOrientation orientation) noexcept { m_screenOrientation = orientation; }
-    [[nodiscard]] ScreenOrientation GetScreenOrientation() const noexcept { return m_screenOrientation; }
+    void SetScreenOrientation(ScreenOrientation orientation) noexcept {
+        m_hal.set_screen_orientation(static_cast<keel::ScreenOrientation>(orientation));
+    }
+    [[nodiscard]] ScreenOrientation GetScreenOrientation() const noexcept {
+        return static_cast<ScreenOrientation>(m_hal.screen_orientation());
+    }
 
     /// Zeros (tares) Pitch and Roll to the current device posture, or clears the tare offset.
     void TareAttitude() noexcept;
     void ResetAttitudeTare() noexcept;
-    [[nodiscard]] bool HasAttitudeTare() const noexcept { return m_hasAttitudeTare; }
+    [[nodiscard]] bool HasAttitudeTare() const noexcept { return m_hal.has_attitude_tare(); }
 
     /// Contiguous time-series history buffers (oldest -> newest) ready for `guikit::SignalView`.
-    [[nodiscard]] std::span<const float> GetAccelHistoryX() const noexcept { return m_accelHistX; }
-    [[nodiscard]] std::span<const float> GetAccelHistoryY() const noexcept { return m_accelHistY; }
-    [[nodiscard]] std::span<const float> GetAccelHistoryZ() const noexcept { return m_accelHistZ; }
-    [[nodiscard]] std::span<const float> GetAccelMagnitudeHistory() const noexcept { return m_accelHistMag; }
-    [[nodiscard]] std::span<const float> GetGyroMagnitudeHistory() const noexcept { return m_gyroHistMag; }
-    [[nodiscard]] std::span<const float> GetMagMagnitudeHistory() const noexcept { return m_magHistMag; }
-    [[nodiscard]] std::span<const float> GetBaroAltitudeHistory() const noexcept { return m_baroAltHist; }
+    [[nodiscard]] std::span<const float> GetAccelHistoryX() const noexcept {
+        const auto s = m_hal.accel_history_x();
+        return {s.data(), s.size()};
+    }
+    [[nodiscard]] std::span<const float> GetAccelHistoryY() const noexcept {
+        const auto s = m_hal.accel_history_y();
+        return {s.data(), s.size()};
+    }
+    [[nodiscard]] std::span<const float> GetAccelHistoryZ() const noexcept {
+        const auto s = m_hal.accel_history_z();
+        return {s.data(), s.size()};
+    }
+    [[nodiscard]] std::span<const float> GetAccelMagnitudeHistory() const noexcept {
+        const auto s = m_hal.accel_magnitude_history();
+        return {s.data(), s.size()};
+    }
+    [[nodiscard]] std::span<const float> GetGyroMagnitudeHistory() const noexcept {
+        const auto s = m_hal.gyro_magnitude_history();
+        return {s.data(), s.size()};
+    }
+    [[nodiscard]] std::span<const float> GetMagMagnitudeHistory() const noexcept {
+        const auto s = m_hal.mag_magnitude_history();
+        return {s.data(), s.size()};
+    }
+    [[nodiscard]] std::span<const float> GetBaroAltitudeHistory() const noexcept {
+        const auto s = m_hal.baro_altitude_history();
+        return {s.data(), s.size()};
+    }
 
     /// Access to desktop simulator controls (also usable on Android in "Demo Override" mode).
     [[nodiscard]] SensorSimConfig& GetSimConfig() noexcept { return m_simConfig; }
     [[nodiscard]] const SensorSimConfig& GetSimConfig() const noexcept { return m_simConfig; }
-    void SetUseSimulatorOverride(bool forceSim) noexcept { m_forceSimulator = forceSim; }
-    [[nodiscard]] bool IsUsingSimulator() const noexcept;
+    void SetUseSimulatorOverride(bool forceSim) noexcept { m_hal.set_use_simulator_override(forceSim); }
+    [[nodiscard]] bool IsUsingSimulator() const noexcept { return m_hal.is_using_simulator(); }
+
+    /// Underlying `keel::SensorManager` HAL instance.
+    [[nodiscard]] keel::SensorManager& Hal() noexcept { return m_hal; }
+    [[nodiscard]] const keel::SensorManager& Hal() const noexcept { return m_hal; }
 
     /// Helper: converts atmospheric pressure (hPa) to ISA altitude in meters.
     [[nodiscard]] static float PressureToAltitudeMeters(float pressureHpa, float seaLevelHpa = 1013.25f) noexcept;
@@ -174,42 +204,13 @@ public:
     ) noexcept;
 
 private:
-    void PollAndroidSensors();
-    void StepSimulator(double dtSeconds);
-    void PushHistorySample(const SensorSnapshot& snap);
+    void SyncFromHal();
+    void SyncSimConfigToHal() noexcept;
 
+    keel::SensorManager m_hal{};
     std::array<SensorInfo, static_cast<size_t>(SensorType::Count)> m_infos{};
     SensorSnapshot m_snapshot{};
-    SensorSnapshot m_pendingHardware{};
-    mutable std::mutex m_hwMutex;
-
-    SensorRate m_rate{SensorRate::Game};
-    AttitudeReference m_attitudeRef{AttitudeReference::Handheld};
-    ScreenOrientation m_screenOrientation{ScreenOrientation::Portrait};
-    float m_measuredSampleRateHz{0.0f};
-    bool m_hasAttitudeTare{false};
-    float m_pitchTareDeg{0.0f};
-    float m_rollTareDeg{0.0f};
-    float m_rawUntaredPitchDeg{0.0f};
-    float m_rawUntaredRollDeg{0.0f};
-    float m_seaLevelPressureHpa{1013.25f};
-    double m_simTimeSec{0.0};
-    bool m_initialized{false};
-    bool m_paused{false};
-    bool m_hasHardwareBackend{false};
-    bool m_forceSimulator{false};
     SensorSimConfig m_simConfig{};
-
-    std::vector<float> m_accelHistX;
-    std::vector<float> m_accelHistY;
-    std::vector<float> m_accelHistZ;
-    std::vector<float> m_accelHistMag;
-    std::vector<float> m_gyroHistMag;
-    std::vector<float> m_magHistMag;
-    std::vector<float> m_baroAltHist;
-
-    struct AndroidImpl;
-    AndroidImpl* m_android{nullptr};
 };
 
 } // namespace guikit::mobile

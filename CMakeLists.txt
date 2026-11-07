@@ -18,7 +18,7 @@ option(GUIKIT_MOBILE_BUILD_DEMO "Build GuiKit Mobile interactive sensor/camera w
 option(GUIKIT_MOBILE_BUILD_TESTS "Build GuiKit Mobile unit tests" ${PROJECT_IS_TOP_LEVEL})
 
 # ==============================================================================
-# 1. Submodule: third_party/guikit (Core UI, Scenes, ThorVG & SDL3)
+# 1. Submodules: third_party/guikit & third_party/mobile (keel::mobile HAL)
 # ==============================================================================
 set(GUIKIT_BUILD_DEMO OFF CACHE BOOL "" FORCE)
 set(GUIKIT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -26,8 +26,11 @@ set(GUIKIT_INSTALL OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(third_party/guikit)
 
+set(KEEL_MOBILE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/mobile EXCLUDE_FROM_ALL)
+
 # ==============================================================================
-# 2. Module: guikit::mobile (HAL for Sensors, Camera, GNSS, Audio & System)
+# 2. Module: guikit::mobile (UI & SDL3 Bridge over keel::mobile HAL)
 # ==============================================================================
 set(GUIKIT_MOBILE_SOURCES
     src/guikit/mobile/Sensors.cpp
@@ -49,15 +52,7 @@ target_include_directories(guikit_mobile PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(guikit_mobile PUBLIC guikit::guikit)
-
-if (ANDROID)
-    find_library(ANDROID_LIB android REQUIRED)
-    find_library(ANDROID_LOG_LIB log REQUIRED)
-    find_library(ANDROID_CAMERA2NDK_LIB camera2ndk REQUIRED)
-    find_library(ANDROID_MEDIANDK_LIB mediandk REQUIRED)
-    target_link_libraries(guikit_mobile PUBLIC ${ANDROID_LIB} ${ANDROID_LOG_LIB} ${ANDROID_CAMERA2NDK_LIB} ${ANDROID_MEDIANDK_LIB})
-endif()
+target_link_libraries(guikit_mobile PUBLIC guikit::guikit keel::mobile)
 
 # ==============================================================================
 # 3. Interactive Showcase Application (Android Shared Library / Desktop App)
@@ -91,9 +86,10 @@ endif()
 if (GUIKIT_MOBILE_BUILD_TESTS AND NOT ANDROID)
     enable_testing()
 
-    add_executable(test_mobile
+    add_executable(test_guikit_mobile
         tests/test_mobile.cpp
     )
-    target_link_libraries(test_mobile PRIVATE guikit::mobile)
-    add_test(NAME mobile_hal COMMAND test_mobile)
+    set_target_properties(test_guikit_mobile PROPERTIES OUTPUT_NAME "test_mobile")
+    target_link_libraries(test_guikit_mobile PRIVATE guikit::mobile)
+    add_test(NAME mobile_hal COMMAND test_guikit_mobile)
 endif()
