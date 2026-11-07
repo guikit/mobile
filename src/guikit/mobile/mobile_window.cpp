@@ -1,8 +1,8 @@
-#include "guikit/mobile/MobileWindow.hpp"
+#include "guikit/mobile/mobile_window.hpp"
 #include <algorithm>
 #include <chrono>
 #include <iostream>
-#include "guikit/GuiKit.hpp"
+#include "guikit/guikit.hpp"
 
 namespace guikit::mobile {
 

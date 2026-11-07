@@ -1,13 +1,13 @@
 #pragma once
 
-#include "guikit/Context.hpp"
-#include "guikit/mobile/AudioCapture.hpp"
-#include "guikit/mobile/Camera.hpp"
-#include "guikit/mobile/Location.hpp"
-#include "guikit/mobile/Sensors.hpp"
-#include "guikit/mobile/SystemBridge.hpp"
-#include "guikit/mobile/TouchGesture.hpp"
-#include "guikit/mobile/Types.hpp"
+#include "guikit/context.hpp"
+#include "guikit/mobile/audio_capture.hpp"
+#include "guikit/mobile/camera.hpp"
+#include "guikit/mobile/location.hpp"
+#include "guikit/mobile/sensors.hpp"
+#include "guikit/mobile/system_bridge.hpp"
+#include "guikit/mobile/touch_gesture.hpp"
+#include "guikit/mobile/types.hpp"
 
 namespace guikit::mobile {
 

@@ -5,10 +5,10 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include "guikit/backend/ICanvas.hpp"
-#include "guikit/backend/VectorBackend.hpp"
-#include "guikit/core/FrameMetrics.hpp"
-#include "guikit/core/Theme.hpp"
+#include "guikit/backend/i_canvas.hpp"
+#include "guikit/backend/vector_backend.hpp"
+#include "guikit/core/frame_metrics.hpp"
+#include "guikit/core/theme.hpp"
 
 namespace guikit {
 class Context;

@@ -1,4 +1,4 @@
-#include "guikit/mobile/Camera.hpp"
+#include "guikit/mobile/camera.hpp"
 #include <SDL3/SDL.h>
 #include <cstring>
 
@@ -12,39 +12,6 @@ CameraService::~CameraService() {
 
 bool CameraService::Initialize() {
     const bool ok = m_hal.initialize();
-
-#if !defined(__ANDROID__)
-    // Register any desktop SDL3 webcams into the HAL before syncing device list
-    if (SDL_InitSubSystem(SDL_INIT_CAMERA)) {
-        int count = 0;
-        if (SDL_CameraID* camIds = SDL_GetCameras(&count)) {
-            for (int i = 0; i < count; ++i) {
-                keel::CameraDeviceInfo dev{};
-                dev.platform_camera_id = camIds[i];
-                if (const char* cname = SDL_GetCameraName(camIds[i])) {
-                    dev.name = keel::InplaceString<64>(keel::StringRef(cname));
-                } else {
-                    dev.name = keel::InplaceString<64>("Hardware Camera");
-                }
-                const SDL_CameraPosition pos = SDL_GetCameraPosition(camIds[i]);
-                if (pos == SDL_CAMERA_POSITION_FRONT_FACING) {
-                    dev.facing = keel::CameraFacing::Front;
-                } else if (pos == SDL_CAMERA_POSITION_BACK_FACING) {
-                    dev.facing = keel::CameraFacing::Back;
-                } else {
-                    dev.facing = keel::CameraFacing::External;
-                }
-                dev.preferred_width = 640;
-                dev.preferred_height = 480;
-                dev.preferred_fps = 30.0f;
-                dev.is_synthetic = false;
-                m_hal.register_external_device(dev);
-            }
-            SDL_free(camIds);
-        }
-    }
-#endif
-
     SyncDevicesFromHal();
     SyncStatsFromHal();
     return ok;
@@ -63,36 +30,13 @@ void CameraService::Shutdown() {
 }
 
 bool CameraService::OpenCamera(size_t deviceIndex, int width, int height) {
-    if (m_sdlCamera) {
-        SDL_CloseCamera(static_cast<SDL_Camera*>(m_sdlCamera));
-        m_sdlCamera = nullptr;
-    }
-
     const bool ok = m_hal.open_camera(deviceIndex, width, height);
     SyncDevicesFromHal();
-
-#if !defined(__ANDROID__)
-    if (const auto* dev = GetActiveDevice(); dev && !dev->isSynthetic && dev->sdlCameraId != 0) {
-        SDL_CameraSpec spec{};
-        spec.format = SDL_PIXELFORMAT_RGB24;
-        spec.colorspace = SDL_COLORSPACE_SRGB;
-        spec.width = width > 0 ? width : dev->preferredWidth;
-        spec.height = height > 0 ? height : dev->preferredHeight;
-        spec.framerate_numerator = 30;
-        spec.framerate_denominator = 1;
-        m_sdlCamera = SDL_OpenCamera(dev->sdlCameraId, &spec);
-    }
-#endif
-
     SyncStatsFromHal();
     return ok;
 }
 
 void CameraService::CloseCamera() {
-    if (m_sdlCamera) {
-        SDL_CloseCamera(static_cast<SDL_Camera*>(m_sdlCamera));
-        m_sdlCamera = nullptr;
-    }
     m_hal.close_camera();
 }
 
@@ -113,28 +57,6 @@ const CameraDeviceInfo* CameraService::GetActiveDevice() const noexcept {
 
 void CameraService::UpdateFrame(double dtSeconds, void* nativeRenderer) {
     if (!m_hal.is_streaming() || m_hal.is_paused()) return;
-
-#if !defined(__ANDROID__)
-    if (m_sdlCamera) {
-        auto* sdlCam = static_cast<SDL_Camera*>(m_sdlCamera);
-        Uint64 timestampNs = 0;
-        if (SDL_Surface* frameSurf = SDL_AcquireCameraFrame(sdlCam, &timestampNs)) {
-            if (SDL_Surface* rgbSurf = SDL_ConvertSurface(frameSurf, SDL_PIXELFORMAT_RGB24)) {
-                if (rgbSurf->w > 0 && rgbSurf->h > 0 && rgbSurf->pixels) {
-                    const size_t totalBytes = static_cast<size_t>(rgbSurf->pitch) * static_cast<size_t>(rgbSurf->h);
-                    m_hal.push_external_rgb_frame(
-                        keel::ArrayRef<uint8_t>(static_cast<const uint8_t*>(rgbSurf->pixels), totalBytes),
-                        static_cast<uint32_t>(rgbSurf->w),
-                        static_cast<uint32_t>(rgbSurf->h),
-                        static_cast<size_t>(rgbSurf->pitch)
-                    );
-                }
-                SDL_DestroySurface(rgbSurf);
-            }
-            SDL_ReleaseCameraFrame(sdlCam, frameSurf);
-        }
-    }
-#endif
 
     const uint64_t prevSeq = m_hal.frame_stats().frame_sequence;
     m_hal.update_frame(dtSeconds);

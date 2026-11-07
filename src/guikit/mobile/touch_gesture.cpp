@@ -1,4 +1,4 @@
-#include "guikit/mobile/TouchGesture.hpp"
+#include "guikit/mobile/touch_gesture.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>

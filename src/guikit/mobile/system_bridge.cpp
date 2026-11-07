@@ -1,4 +1,4 @@
-#include "guikit/mobile/SystemBridge.hpp"
+#include "guikit/mobile/system_bridge.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
 

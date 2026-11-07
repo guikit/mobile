@@ -1,12 +1,12 @@
-#include "guikit/mobile/SdlMobileWindowBackend.hpp"
+#include "guikit/mobile/sdl_mobile_window_backend.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
-#include "guikit/Context.hpp"
-#include "guikit/backend/SdlCanvas.hpp"
-#include "guikit/backend/ThorCanvas.hpp"
-#include "guikit/mobile/MobileRuntime.hpp"
+#include "guikit/context.hpp"
+#include "guikit/backend/sdl_canvas.hpp"
+#include "guikit/backend/thor_canvas.hpp"
+#include "guikit/mobile/mobile_runtime.hpp"
 
 namespace guikit::mobile {
 

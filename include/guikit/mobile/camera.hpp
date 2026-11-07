@@ -5,8 +5,8 @@
 #include <span>
 #include <string>
 #include <vector>
-#include "guikit/mobile/Types.hpp"
-#include "guikit/widgets/ImageView.hpp"
+#include "guikit/mobile/types.hpp"
+#include "guikit/widgets/image_view.hpp"
 #include "keel/mobile/camera.h"
 
 namespace guikit::mobile {
@@ -141,7 +141,6 @@ private:
     keel::CameraService m_hal{};
     std::vector<CameraDeviceInfo> m_devices{};
     CameraFrameStats m_stats{};
-    void* m_sdlCamera{nullptr};
     void* m_previewTexture{nullptr};
     uint32_t m_texWidth{0};
     uint32_t m_texHeight{0};

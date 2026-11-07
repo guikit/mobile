@@ -1,4 +1,4 @@
-#include "guikit/mobile/MobileRuntime.hpp"
+#include "guikit/mobile/mobile_runtime.hpp"
 #include <SDL3/SDL.h>
 
 namespace guikit::mobile {

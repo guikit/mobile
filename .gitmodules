@@ -1,10 +1,8 @@
 [submodule "third_party/guikit"]
 	path = third_party/guikit
 	url = git@github.com:guikit/guikit.git
-	branch = mobile
-[submodule "third_party/keel"]
-	path = third_party/keel
-	url = git@github.com:keelcpp/keel.git
+	branch = main
 [submodule "third_party/mobile"]
 	path = third_party/mobile
 	url = git@github.com:keelcpp/mobile.git
+	branch = main

@@ -6,9 +6,9 @@
 #include <cmath>
 #include <string>
 #include <vector>
-#include "guikit/Mobile.hpp"
-#include "guikit/geo/GeoJsonIO.hpp"
-#include "guikit/geo/GisRenderEngine.hpp"
+#include "guikit/mobile.hpp"
+#include "guikit/geo/geo_json_io.hpp"
+#include "guikit/geo/gis_render_engine.hpp"
 
 namespace {
 

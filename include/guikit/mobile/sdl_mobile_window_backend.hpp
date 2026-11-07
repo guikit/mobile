@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
-#include "guikit/mobile/IMobileWindowBackend.hpp"
+#include "guikit/mobile/i_mobile_window_backend.hpp"
 
 struct SDL_Window;
 struct SDL_Renderer;

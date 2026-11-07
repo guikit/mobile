@@ -3,8 +3,8 @@
 #include <cstdint>
 #include <span>
 #include <vector>
-#include "guikit/geo/MapGrid.hpp"
-#include "guikit/mobile/Types.hpp"
+#include "guikit/geo/map_grid.hpp"
+#include "guikit/mobile/types.hpp"
 #include "keel/mobile/location.h"
 
 namespace guikit::mobile {

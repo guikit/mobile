@@ -6,10 +6,10 @@
 #include <memory>
 #include <span>
 #include <string_view>
-#include "guikit/Context.hpp"
-#include "guikit/core/FrameMetrics.hpp"
-#include "guikit/mobile/IMobileWindowBackend.hpp"
-#include "guikit/mobile/MobileRuntime.hpp"
+#include "guikit/context.hpp"
+#include "guikit/core/frame_metrics.hpp"
+#include "guikit/mobile/i_mobile_window_backend.hpp"
+#include "guikit/mobile/mobile_runtime.hpp"
 
 namespace guikit::mobile {
 

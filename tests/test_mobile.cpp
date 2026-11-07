@@ -3,8 +3,8 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
-#include "guikit/Mobile.hpp"
-#include "guikit/backend/ThorCanvas.hpp"
+#include "guikit/mobile.hpp"
+#include "guikit/backend/thor_canvas.hpp"
 
 using namespace guikit;
 using namespace guikit::mobile;

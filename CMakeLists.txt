@@ -33,15 +33,14 @@ add_subdirectory(third_party/mobile EXCLUDE_FROM_ALL)
 # 2. Module: guikit::mobile (UI & SDL3 Bridge over keel::mobile HAL)
 # ==============================================================================
 set(GUIKIT_MOBILE_SOURCES
-    src/guikit/mobile/Sensors.cpp
-    src/guikit/mobile/Camera.cpp
-    src/guikit/mobile/Location.cpp
-    src/guikit/mobile/AudioCapture.cpp
-    src/guikit/mobile/SystemBridge.cpp
-    src/guikit/mobile/TouchGesture.cpp
-    src/guikit/mobile/MobileRuntime.cpp
-    src/guikit/mobile/MobileWindow.cpp
-    src/guikit/mobile/SdlMobileWindowBackend.cpp
+    src/guikit/mobile/sensors.cpp
+    src/guikit/mobile/camera.cpp
+    src/guikit/mobile/location.cpp
+    src/guikit/mobile/system_bridge.cpp
+    src/guikit/mobile/touch_gesture.cpp
+    src/guikit/mobile/mobile_runtime.cpp
+    src/guikit/mobile/mobile_window.cpp
+    src/guikit/mobile/sdl_mobile_window_backend.cpp
 )
 
 add_library(guikit_mobile STATIC ${GUIKIT_MOBILE_SOURCES})
