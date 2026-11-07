@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -10,7 +9,7 @@
 
 namespace guikit::mobile {
 
-/// System-level bridge for Mobile OS features backed by `keel::SystemBridge` (`keelcpp/mobile`) + SDL3 window integration.
+/// System-level bridge for Mobile OS features backed by `keel::SystemBridge` (`keelcpp/mobile`).
 class SystemBridge {
 public:
     using PermissionCallback = std::function<void(Permission, PermissionStatus)>;
@@ -44,8 +43,12 @@ public:
     }
 
     // --- Haptics & Tactile Feedback ---
-    void TriggerHaptic(HapticStyle style = HapticStyle::Light);
-    void VibrateMs(uint32_t durationMs);
+    void TriggerHaptic(HapticStyle style = HapticStyle::Light) {
+        m_hal.trigger_haptic(static_cast<keel::HapticStyle>(style));
+    }
+    void VibrateMs(uint32_t durationMs) {
+        m_hal.vibrate_ms(durationMs);
+    }
     void SetHapticsEnabled(bool enabled) noexcept { m_hal.set_haptics_enabled(enabled); }
     [[nodiscard]] bool IsHapticsEnabled() const noexcept { return m_hal.is_haptics_enabled(); }
     [[nodiscard]] uint64_t GetHapticPulseCount() const noexcept { return m_hal.haptic_pulse_count(); }
@@ -74,22 +77,21 @@ public:
     // --- Soft Keyboard (IME) & Native Toast ---
     void SetSoftKeyboardVisible(bool visible);
     [[nodiscard]] bool IsSoftKeyboardVisible() const noexcept;
-    void ShowNativeToast(std::string_view message, bool longDuration = false);
+    void ShowNativeToast(std::string_view message, bool longDuration = false) {
+        m_hal.show_native_toast(keel::StringRef(message.data(), message.size()), longDuration);
+    }
 
     [[nodiscard]] keel::SystemBridge& Hal() noexcept { return m_hal; }
     [[nodiscard]] const keel::SystemBridge& Hal() const noexcept { return m_hal; }
 
 private:
     void SyncFromHal();
-    void UpdateSafeArea();
-    void UpdateBatteryInfo();
+    void UpdateWindowSafeArea();
 
     keel::SystemBridge m_hal{};
     void* m_window{nullptr};
-    void* m_haptic{nullptr};
     DeviceInfo m_deviceInfo{};
     BatteryStatus m_battery{};
-    double m_pollTimerSec{0.0};
 };
 
 } // namespace guikit::mobile

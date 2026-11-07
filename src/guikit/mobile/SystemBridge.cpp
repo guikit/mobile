@@ -1,21 +1,8 @@
 #include "guikit/mobile/SystemBridge.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
-#include <string>
 
 namespace guikit::mobile {
-
-namespace {
-
-#ifdef __ANDROID__
-struct PermissionRequestContext {
-    SystemBridge* bridge{nullptr};
-    Permission perm{Permission::Camera};
-    SystemBridge::PermissionCallback callback{};
-};
-#endif
-
-} // namespace
 
 SystemBridge::SystemBridge() = default;
 
@@ -38,24 +25,12 @@ bool SystemBridge::Initialize(void* nativeWindowHandle) {
     m_hal.set_simulate_mobile_cutout(false);
 #endif
 
-    if (SDL_InitSubSystem(SDL_INIT_HAPTIC)) {
-        m_haptic = SDL_OpenHapticFromMouse();
-        if (m_haptic) {
-            SDL_InitHapticRumble(static_cast<SDL_Haptic*>(m_haptic));
-        }
-    }
-
-    UpdateSafeArea();
-    UpdateBatteryInfo();
+    UpdateWindowSafeArea();
     SyncFromHal();
     return ok;
 }
 
 void SystemBridge::Shutdown() {
-    if (m_haptic) {
-        SDL_CloseHaptic(static_cast<SDL_Haptic*>(m_haptic));
-        m_haptic = nullptr;
-    }
     m_hal.shutdown();
 }
 
@@ -64,47 +39,11 @@ void SystemBridge::UpdateFrame(double dtSeconds) {
     m_hal.set_android_context(SDL_GetAndroidJNIEnv(), SDL_GetAndroidActivity());
 #endif
     m_hal.update_frame(dtSeconds);
-    m_pollTimerSec += dtSeconds;
-    UpdateSafeArea();
-    if (m_pollTimerSec >= 2.0) {
-        m_pollTimerSec = 0.0;
-        UpdateBatteryInfo();
-    }
+    UpdateWindowSafeArea();
     SyncFromHal();
 }
 
 void SystemBridge::RequestPermission(Permission perm, PermissionCallback callback) {
-#ifdef __ANDROID__
-    const char* androidPerm = GetAndroidPermissionString(perm);
-    auto* reqCtx = new PermissionRequestContext{this, perm, std::move(callback)};
-
-    const bool started = SDL_RequestAndroidPermission(
-        androidPerm,
-        [](void* userdata, const char* /*permission*/, bool granted) {
-            auto* ctx = static_cast<PermissionRequestContext*>(userdata);
-            const PermissionStatus status = granted ? PermissionStatus::Granted : PermissionStatus::Denied;
-            if (ctx->bridge) {
-                ctx->bridge->Hal().set_permission_status(
-                    static_cast<keel::Permission>(ctx->perm),
-                    static_cast<keel::PermissionStatus>(status)
-                );
-            }
-            if (ctx->callback) {
-                ctx->callback(ctx->perm, status);
-            }
-            delete ctx;
-        },
-        reqCtx
-    );
-
-    if (!started) {
-        m_hal.set_permission_status(static_cast<keel::Permission>(perm), keel::PermissionStatus::Denied);
-        if (reqCtx->callback) {
-            reqCtx->callback(perm, PermissionStatus::Denied);
-        }
-        delete reqCtx;
-    }
-#else
     m_hal.request_permission(
         static_cast<keel::Permission>(perm),
         [&](keel::Permission p, keel::PermissionStatus st) {
@@ -113,26 +52,9 @@ void SystemBridge::RequestPermission(Permission perm, PermissionCallback callbac
             }
         }
     );
-#endif
 }
 
-void SystemBridge::TriggerHaptic(HapticStyle style) {
-    if (!m_hal.is_haptics_enabled()) return;
-    m_hal.trigger_haptic(static_cast<keel::HapticStyle>(style));
-    if (m_haptic) {
-        SDL_PlayHapticRumble(static_cast<SDL_Haptic*>(m_haptic), 0.65f, 20);
-    }
-}
-
-void SystemBridge::VibrateMs(uint32_t durationMs) {
-    if (!m_hal.is_haptics_enabled() || durationMs == 0) return;
-    m_hal.vibrate_ms(durationMs);
-    if (m_haptic) {
-        SDL_PlayHapticRumble(static_cast<SDL_Haptic*>(m_haptic), 0.65f, durationMs);
-    }
-}
-
-void SystemBridge::UpdateSafeArea() {
+void SystemBridge::UpdateWindowSafeArea() {
     if (!m_window) return;
 
     auto* sdlWin = static_cast<SDL_Window*>(m_window);
@@ -182,21 +104,6 @@ void SystemBridge::UpdateSafeArea() {
 #endif
 }
 
-void SystemBridge::UpdateBatteryInfo() {
-    int seconds = 0;
-    int percent = -1;
-    const SDL_PowerState state = SDL_GetPowerInfo(&seconds, &percent);
-
-    keel::BatteryStatus bat = m_hal.battery_status();
-    if (percent >= 0 && percent <= 100) {
-        bat.level_pct = static_cast<float>(percent);
-    } else if (m_hal.device_info().is_simulator) {
-        bat.level_pct = 86.0f;
-    }
-    bat.is_charging = (state == SDL_POWERSTATE_CHARGING || state == SDL_POWERSTATE_CHARGED);
-    m_hal.set_battery_status(bat);
-}
-
 void SystemBridge::SyncFromHal() {
     const auto& di = m_hal.device_info();
     m_deviceInfo.platformName.assign(di.platform_name.data(), di.platform_name.size());
@@ -225,16 +132,6 @@ void SystemBridge::SetSoftKeyboardVisible(bool visible) {
 
 bool SystemBridge::IsSoftKeyboardVisible() const noexcept {
     return m_window ? SDL_TextInputActive(static_cast<SDL_Window*>(m_window)) : false;
-}
-
-void SystemBridge::ShowNativeToast(std::string_view message, bool longDuration) {
-#ifdef __ANDROID__
-    const std::string msgStr(message);
-    SDL_ShowAndroidToast(msgStr.c_str(), longDuration ? 1 : 0, -1, 0, 0);
-#else
-    (void)message;
-    (void)longDuration;
-#endif
 }
 
 } // namespace guikit::mobile

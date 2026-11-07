@@ -8,8 +8,8 @@
 namespace guikit::mobile {
 
 /// Real-time Microphone PCM Audio Capture and Spectral Analyzer backed by `keel::AudioCapture` (`keelcpp/mobile`).
-/// Streams audio from the device microphone via SDL3 Audio (Android AAudio/OpenSLES, Windows WASAPI, etc.)
-/// or generates a calibrated multi-tone + noise test signal inside `keel::AudioCapture`.
+/// Zero SDL dependency: captures audio natively via Android NDK AAudio / Windows WinMM inside `keel::AudioCapture`
+/// (with automatic multi-tone + noise test signal synthesis when no physical microphone is available).
 /// Directly feeds `guikit::SignalView`, `guikit::WaterfallView`, and `guikit::LevelMeter`.
 class AudioCapture {
 public:
@@ -17,22 +17,22 @@ public:
     static constexpr size_t kWaveformWindowSamples = keel::AudioCapture::kWaveformWindowSamples;
     static constexpr size_t kSpectrumBins = keel::AudioCapture::kSpectrumBins;
 
-    AudioCapture();
-    ~AudioCapture();
+    AudioCapture() = default;
+    ~AudioCapture() { Shutdown(); }
 
     AudioCapture(const AudioCapture&) = delete;
     AudioCapture& operator=(const AudioCapture&) = delete;
 
-    bool Initialize(uint32_t sampleRate = kDefaultSampleRate);
-    void Shutdown();
+    bool Initialize(uint32_t sampleRate = kDefaultSampleRate) { return m_hal.initialize(sampleRate); }
+    void Shutdown() { m_hal.shutdown(); }
 
-    bool SetCapturing(bool enabled);
+    bool SetCapturing(bool enabled) { return m_hal.set_capturing(enabled); }
     [[nodiscard]] bool IsCapturing() const noexcept { return m_hal.is_capturing(); }
     [[nodiscard]] bool IsUsingSyntheticSignal() const noexcept { return m_hal.is_using_synthetic_signal(); }
     void SetForceSyntheticSignal(bool forceSynth) noexcept { m_hal.set_force_synthetic_signal(forceSynth); }
 
     /// Pulls latest captured PCM samples, updates RMS/Peak dBFS meters and 512-bin FFT spectrum slice.
-    void UpdateFrame(double dtSeconds);
+    void UpdateFrame(double dtSeconds) { m_hal.update_frame(dtSeconds); }
 
     [[nodiscard]] float GetSampleRate() const noexcept { return m_hal.sample_rate(); }
 
@@ -74,7 +74,6 @@ public:
 
 private:
     keel::AudioCapture m_hal{};
-    void* m_audioStream{nullptr};
 };
 
 } // namespace guikit::mobile
